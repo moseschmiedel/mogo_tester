@@ -1,0 +1,68 @@
+# mogo_tester
+
+`mogo-tester` discovers top-level Mojo files in a directory, compiles each one
+with `mojo build`, runs the produced binary, and prints per-file results plus a
+final summary.
+
+## Requirements
+
+- Go 1.26.3 or newer
+- Mojo on `PATH`
+
+## Run
+
+```sh
+go run ./cmd/mogo-tester [OPTION...] TEST-DIR
+```
+
+Useful flags:
+
+```text
+--parallel N              maximum concurrent compile/run jobs (default: CPU count)
+--mojo-build-arg VALUE    extra argument passed to mojo build; repeatable
+--mojo-build-args VALUE   space-separated arguments passed to mojo build
+--keep-artifacts          keep compiled binaries and print the artifact directory
+--no-color                disable colored output
+--version                 print version and exit
+--help                    display help and exit
+```
+
+Example:
+
+```sh
+go run ./cmd/mogo-tester --parallel 4 --mojo-build-args "-I src" test
+```
+
+## Test
+
+```sh
+GOCACHE="$PWD/.gocache" go test ./...
+```
+
+## Build
+
+```sh
+go build -o bin/mogo-tester ./cmd/mogo-tester
+```
+
+For release builds, inject explicit version metadata:
+
+```sh
+go build \
+  -ldflags "-X main.version=v1.2.3 -X main.commit=$(git rev-parse --short HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -o bin/mogo-tester \
+  ./cmd/mogo-tester
+```
+
+If metadata is not injected, `mogo-tester --version` falls back to Go build
+metadata from `debug.ReadBuildInfo()` when available.
+
+## Release
+
+Pushing a version tag runs the release workflow, builds Linux, macOS, and
+Windows archives, and attaches them to a GitHub Release:
+
+```sh
+git tag v2.0.0
+git push origin v2.0.0
+```

@@ -1,0 +1,16 @@
+# Binaries and test artifacts
+/bin/
+/dist/
+*.test
+*.out
+coverage.out
+.gocache/
+
+# Local environment
+.env
+.env.*
+
+# Editor and OS files
+.DS_Store
+.idea/
+.vscode/
