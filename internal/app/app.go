@@ -18,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/creack/pty"
 )
 
 var errNoTests = errors.New("no top-level .mojo files found")
@@ -45,18 +47,33 @@ func (r *repeatableStrings) Set(value string) error {
 type processResult struct {
 	stdout   string
 	stderr   string
+	combined bool
 	exitCode int
 	duration time.Duration
 	err      error
 }
 
+type commandOptions struct {
+	fakeTTY bool
+}
+
 type commandExecutor interface {
-	Run(ctx context.Context, name string, args ...string) processResult
+	Run(ctx context.Context, opts commandOptions, name string, args ...string) processResult
 }
 
 type execCommandExecutor struct{}
 
-func (execCommandExecutor) Run(ctx context.Context, name string, args ...string) processResult {
+func (execCommandExecutor) Run(ctx context.Context, opts commandOptions, name string, args ...string) processResult {
+	if opts.fakeTTY {
+		result := runCommandWithTTY(ctx, name, args...)
+		if !errors.Is(result.err, pty.ErrUnsupported) {
+			return result
+		}
+	}
+	return runCommandWithPipes(ctx, name, args...)
+}
+
+func runCommandWithPipes(ctx context.Context, name string, args ...string) processResult {
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, name, args...)
 
@@ -81,6 +98,56 @@ func (execCommandExecutor) Run(ctx context.Context, name string, args ...string)
 		duration: time.Since(start),
 		err:      err,
 	}
+}
+
+func runCommandWithTTY(ctx context.Context, name string, args ...string) processResult {
+	start := time.Now()
+	cmd := exec.CommandContext(ctx, name, args...)
+
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		return processResult{exitCode: -1, duration: time.Since(start), err: err}
+	}
+	defer func() { _ = ptmx.Close() }()
+
+	cmd.Stdout = tty
+	cmd.Stderr = tty
+
+	var output bytes.Buffer
+	copyDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&output, ptmx)
+		close(copyDone)
+	}()
+
+	err = cmd.Start()
+	_ = tty.Close()
+	if err == nil {
+		err = cmd.Wait()
+	}
+	_ = ptmx.Close()
+	<-copyDone
+
+	exitCode := 0
+	if err != nil {
+		exitCode = -1
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+
+	return processResult{
+		stdout:   normalizePTYOutput(output.String()),
+		combined: true,
+		exitCode: exitCode,
+		duration: time.Since(start),
+		err:      err,
+	}
+}
+
+func normalizePTYOutput(output string) string {
+	return strings.ReplaceAll(output, "\r\n", "\n")
 }
 
 type fileResult struct {
@@ -373,13 +440,13 @@ func runOne(ctx context.Context, cfg config, artifactDir, path string, executor 
 	buildArgs = append(buildArgs, "-o", result.binaryPath, path)
 	result.compileCmd = append([]string{"mojo"}, buildArgs...)
 
-	result.compile = executor.Run(ctx, "mojo", buildArgs...)
+	result.compile = executor.Run(ctx, commandOptions{}, "mojo", buildArgs...)
 	if !commandSucceeded(result.compile) {
 		return result
 	}
 
 	result.didRun = true
-	result.run = executor.Run(ctx, result.binaryPath)
+	result.run = executor.Run(ctx, commandOptions{fakeTTY: true}, result.binaryPath)
 	return result
 }
 
@@ -488,6 +555,9 @@ func printProcess(w io.Writer, label string, result processResult, colors output
 
 	if _, err := fmt.Fprintf(w, "%s: %s exit=%d duration=%s\n", label, statusText, result.exitCode, result.duration); err != nil {
 		return err
+	}
+	if result.combined {
+		return printCaptured(w, label+" output", combinedOutputWithError(result))
 	}
 	if err := printCaptured(w, label+" stdout", result.stdout); err != nil {
 		return err
@@ -603,4 +673,11 @@ func stderrWithError(result processResult) string {
 		return result.stderr + result.err.Error()
 	}
 	return result.stderr + "\n" + result.err.Error()
+}
+
+func combinedOutputWithError(result processResult) string {
+	if result.err == nil || result.stdout != "" {
+		return result.stdout
+	}
+	return result.err.Error()
 }

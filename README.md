@@ -2,7 +2,8 @@
 
 `mogo-tester` discovers top-level Mojo files in a directory, compiles each one
 with `mojo build`, runs the produced binary, and prints per-file results plus a
-final summary.
+final summary. Compiled test binaries run with fake TTY-backed stdout and stderr
+so terminal-aware test output behaves as it would in an interactive terminal.
 
 ## Requirements
 

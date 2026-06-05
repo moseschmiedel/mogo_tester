@@ -264,10 +264,10 @@ func TestRunWithFakeExecutorReportsPassCompileFailureAndRunFailure(t *testing.T)
 	for _, want := range []string{
 		"compile command: mojo build -I src --foo bar -o ",
 		"compile stdout:\ncompile pass\n",
-		"run stdout:\nrun pass\n",
+		"run output:\nrun pass\n",
 		"compile stderr:\ncompile failed\n",
 		"run: SKIPPED\nresult: FAIL\n",
-		"run stderr:\nrun failed\n",
+		"run output:\nrun failed\n",
 		"Summary: total=3 passed=1 failed_compile=1 failed_run=1",
 	} {
 		if !strings.Contains(output, want) {
@@ -346,7 +346,7 @@ exit 0
 		"compile command: mojo build -I src -o ",
 		"compile stdout:\nfake compile stdout\n",
 		"compile stderr:\nfake compile stderr\n",
-		"run stdout:\nfake binary ran\n",
+		"run output:\nfake binary ran\n",
 		"result: PASS\n",
 		"Summary: total=1 passed=1 failed_compile=0 failed_run=0",
 	} {
@@ -401,7 +401,7 @@ exit 0
 	output := stdout.String()
 	for _, want := range []string{
 		"run: FAIL exit=7",
-		"run stderr:\nfailing binary\n",
+		"run output:\nfailing binary\n",
 		"Summary: total=1 passed=0 failed_compile=0 failed_run=1",
 	} {
 		if !strings.Contains(output, want) {
@@ -478,6 +478,95 @@ func TestRunHonorsParallelLimit(t *testing.T) {
 	}
 	if got, want := executor.callCount(), 16; got != want {
 		t.Fatalf("command count = %d, want %d", got, want)
+	}
+}
+
+func TestRunUsesFakeTTYForBinaryOnly(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "pass.mojo")
+	writeTestFile(t, source, "")
+
+	executor := &fakeExecutor{}
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"--no-color", dir}, &stdout, nil, "test", executor)
+	if err != nil {
+		t.Fatalf("run() error = %v\nstdout:\n%s", err, stdout.String())
+	}
+
+	calls := executor.callsSnapshot()
+	if len(calls) != 2 {
+		t.Fatalf("executor calls = %d, want 2: %#v", len(calls), calls)
+	}
+	if calls[0].fakeTTY {
+		t.Fatalf("compile call fakeTTY = true, want false: %#v", calls[0])
+	}
+	if !calls[1].fakeTTY {
+		t.Fatalf("run call fakeTTY = false, want true: %#v", calls[1])
+	}
+}
+
+func TestRunBinarySeesTTYOnStdoutAndStderr(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY-backed fake TTY is not supported on Windows")
+	}
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "sample.mojo")
+	writeTestFile(t, source, "")
+
+	binDir := filepath.Join(dir, "bin")
+	if err := os.Mkdir(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mojoPath := filepath.Join(binDir, "mojo")
+	script := `#!/bin/sh
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+done
+cat > "$out" <<'EOF'
+#!/bin/sh
+if [ ! -t 1 ]; then
+  echo stdout is not a tty
+  exit 3
+fi
+if [ ! -t 2 ]; then
+  echo stderr is not a tty >&2
+  exit 4
+fi
+echo stdout tty
+echo stderr tty >&2
+exit 0
+EOF
+chmod +x "$out"
+exit 0
+`
+	if err := os.WriteFile(mojoPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	var stdout bytes.Buffer
+	err := Run(context.Background(), []string{"--no-color", dir}, &stdout, nil, "test")
+	if err != nil {
+		t.Fatalf("Run() error = %v\nstdout:\n%s", err, stdout.String())
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"run output:\nstdout tty\nstderr tty\n",
+		"result: PASS\n",
+		"Summary: total=1 passed=1 failed_compile=0 failed_run=0",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, output)
+		}
 	}
 }
 
@@ -586,15 +675,16 @@ type fakeExecutor struct {
 }
 
 type fakeCall struct {
-	name string
-	args []string
+	name    string
+	args    []string
+	fakeTTY bool
 }
 
-func (f *fakeExecutor) Run(_ context.Context, name string, args ...string) processResult {
+func (f *fakeExecutor) Run(_ context.Context, opts commandOptions, name string, args ...string) processResult {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	f.calls = append(f.calls, fakeCall{name: name, args: append([]string(nil), args...)})
+	f.calls = append(f.calls, fakeCall{name: name, args: append([]string(nil), args...), fakeTTY: opts.fakeTTY})
 
 	if name == "mojo" {
 		source := args[len(args)-1]
@@ -617,9 +707,11 @@ func (f *fakeExecutor) Run(_ context.Context, name string, args ...string) proce
 
 	source := f.binaryToSource[name]
 	if result, ok := f.runBySource[source]; ok {
+		result = fakeCombinedResult(result, opts.fakeTTY)
 		return result
 	}
-	return successResult("", "")
+	result := successResult("", "")
+	return fakeCombinedResult(result, opts.fakeTTY)
 }
 
 func (f *fakeExecutor) callsSnapshot() []fakeCall {
@@ -637,6 +729,16 @@ func successResult(stdout, stderr string) processResult {
 
 func failResult(stdout, stderr string) processResult {
 	return processResult{stdout: stdout, stderr: stderr, exitCode: 1, duration: time.Millisecond, err: errors.New("exit status 1")}
+}
+
+func fakeCombinedResult(result processResult, combined bool) processResult {
+	if !combined {
+		return result
+	}
+	result.stdout += result.stderr
+	result.stderr = ""
+	result.combined = true
+	return result
 }
 
 func assertBuildArgsForSource(t *testing.T, calls []fakeCall, source string, prefix []string) {
@@ -678,7 +780,7 @@ type parallelTrackingExecutor struct {
 	outputs map[string]string
 }
 
-func (e *parallelTrackingExecutor) Run(_ context.Context, name string, args ...string) processResult {
+func (e *parallelTrackingExecutor) Run(_ context.Context, _ commandOptions, name string, args ...string) processResult {
 	e.mu.Lock()
 	e.active++
 	e.calls++
