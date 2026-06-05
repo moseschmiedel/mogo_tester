@@ -463,6 +463,50 @@ func TestNoColorDisablesANSIOutput(t *testing.T) {
 	}
 }
 
+func TestRunPrintsProgressForActiveTasks(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "progress_test.mojo")
+	writeTestFile(t, source, "")
+
+	var stdout bytes.Buffer
+	err := run(context.Background(), []string{"--no-color", "--parallel", "1", dir}, &stdout, nil, "test", &fakeExecutor{})
+	if err != nil {
+		t.Fatalf("run() error = %v\nstdout:\n%s", err, stdout.String())
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"C progress_test.mojo, PROGRESS [0/1]",
+		"R progress_test.mojo, PROGRESS [0/1]",
+		"PROGRESS [1/1]",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, output)
+		}
+	}
+}
+
+func TestPrintProgressLiveOverwritesCurrentLine(t *testing.T) {
+	t.Parallel()
+
+	progress := newProgressTracker(10)
+	progress.update(progressUpdate{path: filepath.Join("tests", "test_file3.mojo"), stage: stageCompiling})
+	progress.update(progressUpdate{path: filepath.Join("tests", "test_file1.mojo"), stage: stageRunning})
+
+	var stdout bytes.Buffer
+	if err := printProgress(&stdout, progress, true); err != nil {
+		t.Fatalf("printProgress() error = %v", err)
+	}
+
+	got := stdout.String()
+	want := "\r\x1b[2KC test_file3.mojo, R test_file1.mojo, PROGRESS [0/10]"
+	if got != want {
+		t.Fatalf("live progress = %q, want %q", got, want)
+	}
+}
+
 func TestRunHonorsParallelLimit(t *testing.T) {
 	t.Parallel()
 
@@ -478,8 +522,8 @@ func TestRunHonorsParallelLimit(t *testing.T) {
 		t.Fatalf("run() error = %v\nstdout:\n%s", err, stdout.String())
 	}
 
-	if got, want := executor.maxSeen(), 2; got > want {
-		t.Fatalf("max concurrent commands = %d, want <= %d", got, want)
+	if got, want := executor.maxSeen(), 2; got != want {
+		t.Fatalf("max concurrent commands = %d, want %d", got, want)
 	}
 	if got, want := executor.callCount(), 16; got != want {
 		t.Fatalf("command count = %d, want %d", got, want)
@@ -527,7 +571,7 @@ func TestRunOneWithASANAddsSanitizerBuildArgsAndPreload(t *testing.T) {
 			preloadVar: "DYLD_INSERT_LIBRARIES",
 			buildArgs:  []string{"--external-libasan", "/tmp/libclang_rt.asan.dylib"},
 		},
-	}, t.TempDir(), source, executor)
+	}, t.TempDir(), source, executor, make(chan runEvent, 3))
 	if !result.passed() {
 		t.Fatalf("runOne() failed: %#v", result)
 	}
@@ -557,7 +601,7 @@ func TestRunOneWithASANHonorsSkipComment(t *testing.T) {
 			preloadVar: "DYLD_INSERT_LIBRARIES",
 			buildArgs:  []string{"--external-libasan", "/tmp/libclang_rt.asan.dylib"},
 		},
-	}, t.TempDir(), source, executor)
+	}, t.TempDir(), source, executor, make(chan runEvent, 3))
 	if !result.passed() {
 		t.Fatalf("runOne() failed: %#v", result)
 	}
@@ -593,7 +637,7 @@ func TestRunOneWithASANDetectsReportInZeroExitOutput(t *testing.T) {
 			preloadVar: "DYLD_INSERT_LIBRARIES",
 			buildArgs:  []string{"--external-libasan", "/tmp/libclang_rt.asan.dylib"},
 		},
-	}, t.TempDir(), source, executor)
+	}, t.TempDir(), source, executor, make(chan runEvent, 3))
 	if !result.runFailed() {
 		t.Fatalf("runOne() did not treat ASAN report as failure: %#v", result)
 	}

@@ -469,10 +469,10 @@ func discoverTests(dir string) ([]string, error) {
 func runTests(ctx context.Context, cfg config, paths []string, artifactDir string, stdout io.Writer, executor commandExecutor) (runSummary, error) {
 	start := time.Now()
 	jobs := make(chan string)
-	results := make(chan fileResult)
+	events := make(chan runEvent)
 	summaryCh := make(chan printOutcome, 1)
 
-	go printResults(stdout, results, start, !cfg.noColor, summaryCh)
+	go printEvents(stdout, events, start, !cfg.noColor, len(paths), summaryCh)
 
 	var workers sync.WaitGroup
 	for i := 0; i < cfg.parallel; i++ {
@@ -480,7 +480,8 @@ func runTests(ctx context.Context, cfg config, paths []string, artifactDir strin
 		go func() {
 			defer workers.Done()
 			for path := range jobs {
-				results <- runOne(ctx, cfg, artifactDir, path, executor)
+				result := runOne(ctx, cfg, artifactDir, path, executor, events)
+				events <- runEvent{result: &result}
 			}
 		}()
 	}
@@ -490,7 +491,7 @@ func runTests(ctx context.Context, cfg config, paths []string, artifactDir strin
 		case <-ctx.Done():
 			close(jobs)
 			workers.Wait()
-			close(results)
+			close(events)
 			outcome := <-summaryCh
 			if outcome.err != nil {
 				return outcome.summary, outcome.err
@@ -502,7 +503,7 @@ func runTests(ctx context.Context, cfg config, paths []string, artifactDir strin
 
 	close(jobs)
 	workers.Wait()
-	close(results)
+	close(events)
 
 	outcome := <-summaryCh
 	if outcome.err != nil {
@@ -511,7 +512,7 @@ func runTests(ctx context.Context, cfg config, paths []string, artifactDir strin
 	return outcome.summary, nil
 }
 
-func runOne(ctx context.Context, cfg config, artifactDir, path string, executor commandExecutor) fileResult {
+func runOne(ctx context.Context, cfg config, artifactDir, path string, executor commandExecutor, events chan<- runEvent) fileResult {
 	result := fileResult{
 		path:       path,
 		binaryPath: binaryPathFor(artifactDir, path),
@@ -528,8 +529,10 @@ func runOne(ctx context.Context, cfg config, artifactDir, path string, executor 
 	buildArgs = append(buildArgs, "-o", result.binaryPath, path)
 	result.compileCmd = append([]string{"mojo"}, buildArgs...)
 
+	events <- runEvent{progress: progressUpdate{path: path, stage: stageCompiling}}
 	result.compile = executor.Run(ctx, commandOptions{}, "mojo", buildArgs...)
 	if !commandSucceeded(result.compile) {
+		events <- runEvent{progress: progressUpdate{path: path, stage: stageDone}}
 		return result
 	}
 
@@ -538,10 +541,12 @@ func runOne(ctx context.Context, cfg config, artifactDir, path string, executor 
 	if useASAN {
 		runOptions.env = []string{cfg.asanRuntime.preloadVar + "=" + cfg.asanRuntime.libPath}
 	}
+	events <- runEvent{progress: progressUpdate{path: path, stage: stageRunning}}
 	result.run = executor.Run(ctx, runOptions, result.binaryPath)
 	if useASAN && asanReported(result.run) {
 		result.run = markASANFailure(result.run)
 	}
+	events <- runEvent{progress: progressUpdate{path: path, stage: stageDone}}
 	return result
 }
 
@@ -606,12 +611,46 @@ type printOutcome struct {
 	err     error
 }
 
-func printResults(stdout io.Writer, results <-chan fileResult, start time.Time, colorEnabled bool, done chan<- printOutcome) {
+type testStage int
+
+const (
+	stageDone testStage = iota
+	stageCompiling
+	stageRunning
+)
+
+type runEvent struct {
+	progress progressUpdate
+	result   *fileResult
+}
+
+type progressUpdate struct {
+	path  string
+	stage testStage
+}
+
+func printEvents(stdout io.Writer, events <-chan runEvent, start time.Time, colorEnabled bool, total int, done chan<- printOutcome) {
 	summary := runSummary{}
 	var err error
 	colors := outputColors{enabled: colorEnabled}
+	progress := newProgressTracker(total)
+	liveProgress := isTerminal(stdout)
+	progressVisible := false
 
-	for result := range results {
+	for event := range events {
+		if event.progress.path != "" {
+			progress.update(event.progress)
+			if printErr := printProgress(stdout, progress, liveProgress); printErr != nil && err == nil {
+				err = printErr
+			}
+			progressVisible = liveProgress
+			continue
+		}
+		if event.result == nil {
+			continue
+		}
+
+		result := *event.result
 		summary.total++
 		switch {
 		case result.passed():
@@ -622,17 +661,109 @@ func printResults(stdout io.Writer, results <-chan fileResult, start time.Time, 
 			summary.failedRun++
 		}
 
+		if liveProgress && progressVisible {
+			if printErr := clearProgress(stdout); printErr != nil && err == nil {
+				err = printErr
+			}
+			progressVisible = false
+		}
 		if printErr := printResultBlock(stdout, result, colors); printErr != nil && err == nil {
 			err = printErr
 		}
+		if liveProgress && progress.completed < progress.total {
+			if printErr := printProgress(stdout, progress, true); printErr != nil && err == nil {
+				err = printErr
+			}
+			progressVisible = true
+		}
 	}
 
+	if liveProgress && progressVisible {
+		if printErr := clearProgress(stdout); printErr != nil && err == nil {
+			err = printErr
+		}
+	}
 	summary.elapsed = time.Since(start)
 	if printErr := printSummary(stdout, summary, colors); printErr != nil && err == nil {
 		err = printErr
 	}
 
 	done <- printOutcome{summary: summary, err: err}
+}
+
+type progressTracker struct {
+	total     int
+	completed int
+	stages    map[string]testStage
+}
+
+func newProgressTracker(total int) progressTracker {
+	return progressTracker{
+		total:  total,
+		stages: make(map[string]testStage),
+	}
+}
+
+func (p *progressTracker) update(update progressUpdate) {
+	if update.stage == stageDone {
+		if _, ok := p.stages[update.path]; ok {
+			delete(p.stages, update.path)
+			p.completed++
+		}
+		return
+	}
+	p.stages[update.path] = update.stage
+}
+
+func printProgress(w io.Writer, progress progressTracker, live bool) error {
+	line := formatProgress(progress)
+	if live {
+		_, err := fmt.Fprintf(w, "\r\x1b[2K%s", line)
+		return err
+	}
+	_, err := fmt.Fprintln(w, line)
+	return err
+}
+
+func clearProgress(w io.Writer) error {
+	_, err := fmt.Fprint(w, "\r\x1b[2K")
+	return err
+}
+
+func formatProgress(progress progressTracker) string {
+	parts := make([]string, 0, 3)
+	if compiling := progress.pathsFor(stageCompiling); len(compiling) > 0 {
+		parts = append(parts, "C "+strings.Join(compiling, ", "))
+	}
+	if running := progress.pathsFor(stageRunning); len(running) > 0 {
+		parts = append(parts, "R "+strings.Join(running, ", "))
+	}
+	parts = append(parts, fmt.Sprintf("PROGRESS [%d/%d]", progress.completed, progress.total))
+
+	return strings.Join(parts, ", ")
+}
+
+func isTerminal(w io.Writer) bool {
+	file, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
+
+func (p progressTracker) pathsFor(stage testStage) []string {
+	var paths []string
+	for path, current := range p.stages {
+		if current == stage {
+			paths = append(paths, filepath.Base(path))
+		}
+	}
+	sort.Strings(paths)
+	return paths
 }
 
 func printResultBlock(w io.Writer, result fileResult, colors outputColors) error {
