@@ -53,6 +53,7 @@ func TestParseArgsPreservesRepeatedMojoBuildArgs(t *testing.T) {
 		"--mojo-build-arg", "src",
 		"--keep-artifacts",
 		"--no-color",
+		"--asan",
 		"tests",
 	}, &stdout)
 	if err != nil {
@@ -70,6 +71,9 @@ func TestParseArgsPreservesRepeatedMojoBuildArgs(t *testing.T) {
 	}
 	if !cfg.noColor {
 		t.Fatal("noColor = false, want true")
+	}
+	if !cfg.asan {
+		t.Fatal("asan = false, want true")
 	}
 	if cfg.testDir != "tests" {
 		t.Fatalf("testDir = %q, want tests", cfg.testDir)
@@ -173,6 +177,7 @@ func TestRunPrintsHelp(t *testing.T) {
 		"--mojo-build-args VALUE",
 		"--keep-artifacts",
 		"--no-color",
+		"--asan",
 		"--version",
 		"--help",
 	} {
@@ -507,6 +512,96 @@ func TestRunUsesFakeTTYForBinaryOnly(t *testing.T) {
 	}
 }
 
+func TestRunOneWithASANAddsSanitizerBuildArgsAndPreload(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "pass.mojo")
+	writeTestFile(t, source, "")
+
+	executor := &fakeExecutor{}
+	result := runOne(context.Background(), config{
+		asan: true,
+		asanRuntime: asanRuntime{
+			libPath:    "/tmp/libclang_rt.asan.dylib",
+			preloadVar: "DYLD_INSERT_LIBRARIES",
+			buildArgs:  []string{"--external-libasan", "/tmp/libclang_rt.asan.dylib"},
+		},
+	}, t.TempDir(), source, executor)
+	if !result.passed() {
+		t.Fatalf("runOne() failed: %#v", result)
+	}
+
+	calls := executor.callsSnapshot()
+	if len(calls) != 2 {
+		t.Fatalf("executor calls = %d, want 2: %#v", len(calls), calls)
+	}
+	assertBuildArgsForSource(t, calls, source, []string{"build", "--sanitize", "address", "--external-libasan", "/tmp/libclang_rt.asan.dylib", "-o"})
+	if got, want := calls[1].env, []string{"DYLD_INSERT_LIBRARIES=/tmp/libclang_rt.asan.dylib"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("run env = %#v, want %#v", got, want)
+	}
+}
+
+func TestRunOneWithASANHonorsSkipComment(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "skip.mojo")
+	writeTestFile(t, source, "# SKIP_ASAN\n")
+
+	executor := &fakeExecutor{}
+	result := runOne(context.Background(), config{
+		asan: true,
+		asanRuntime: asanRuntime{
+			libPath:    "/tmp/libclang_rt.asan.dylib",
+			preloadVar: "DYLD_INSERT_LIBRARIES",
+			buildArgs:  []string{"--external-libasan", "/tmp/libclang_rt.asan.dylib"},
+		},
+	}, t.TempDir(), source, executor)
+	if !result.passed() {
+		t.Fatalf("runOne() failed: %#v", result)
+	}
+
+	calls := executor.callsSnapshot()
+	if len(calls) != 2 {
+		t.Fatalf("executor calls = %d, want 2: %#v", len(calls), calls)
+	}
+	if contains(calls[0].args, "--sanitize") {
+		t.Fatalf("build args contain ASAN sanitizer despite skip comment: %#v", calls[0].args)
+	}
+	if len(calls[1].env) != 0 {
+		t.Fatalf("run env = %#v, want empty", calls[1].env)
+	}
+}
+
+func TestRunOneWithASANDetectsReportInZeroExitOutput(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "asan_fail.mojo")
+	writeTestFile(t, source, "")
+
+	executor := &fakeExecutor{
+		runBySource: map[string]processResult{
+			source: successResult("ERROR: AddressSanitizer: heap-use-after-free\n", ""),
+		},
+	}
+	result := runOne(context.Background(), config{
+		asan: true,
+		asanRuntime: asanRuntime{
+			libPath:    "/tmp/libclang_rt.asan.dylib",
+			preloadVar: "DYLD_INSERT_LIBRARIES",
+			buildArgs:  []string{"--external-libasan", "/tmp/libclang_rt.asan.dylib"},
+		},
+	}, t.TempDir(), source, executor)
+	if !result.runFailed() {
+		t.Fatalf("runOne() did not treat ASAN report as failure: %#v", result)
+	}
+	if result.run.err == nil || !strings.Contains(result.run.err.Error(), "AddressSanitizer") {
+		t.Fatalf("run err = %v, want AddressSanitizer detection error", result.run.err)
+	}
+}
+
 func TestRunBinarySeesTTYOnStdoutAndStderr(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("PTY-backed fake TTY is not supported on Windows")
@@ -678,13 +773,14 @@ type fakeCall struct {
 	name    string
 	args    []string
 	fakeTTY bool
+	env     []string
 }
 
 func (f *fakeExecutor) Run(_ context.Context, opts commandOptions, name string, args ...string) processResult {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	f.calls = append(f.calls, fakeCall{name: name, args: append([]string(nil), args...), fakeTTY: opts.fakeTTY})
+	f.calls = append(f.calls, fakeCall{name: name, args: append([]string(nil), args...), fakeTTY: opts.fakeTTY, env: append([]string(nil), opts.env...)})
 
 	if name == "mojo" {
 		source := args[len(args)-1]
@@ -761,6 +857,15 @@ func assertBuildArgsForSource(t *testing.T, calls []fakeCall, source string, pre
 	}
 
 	t.Fatalf("missing build call for %s in %#v", source, calls)
+}
+
+func contains(values []string, needle string) bool {
+	for _, value := range values {
+		if value == needle {
+			return true
+		}
+	}
+	return false
 }
 
 func writeTestFile(t *testing.T, path, content string) {

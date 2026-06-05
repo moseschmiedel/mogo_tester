@@ -31,6 +31,8 @@ type config struct {
 	keepArtifacts bool
 	noColor       bool
 	showVersion   bool
+	asan          bool
+	asanRuntime   asanRuntime
 }
 
 type repeatableStrings []string
@@ -53,8 +55,15 @@ type processResult struct {
 	err      error
 }
 
+type asanRuntime struct {
+	libPath    string
+	preloadVar string
+	buildArgs  []string
+}
+
 type commandOptions struct {
 	fakeTTY bool
+	env     []string
 }
 
 type commandExecutor interface {
@@ -65,17 +74,18 @@ type execCommandExecutor struct{}
 
 func (execCommandExecutor) Run(ctx context.Context, opts commandOptions, name string, args ...string) processResult {
 	if opts.fakeTTY {
-		result := runCommandWithTTY(ctx, name, args...)
+		result := runCommandWithTTY(ctx, opts, name, args...)
 		if !errors.Is(result.err, pty.ErrUnsupported) {
 			return result
 		}
 	}
-	return runCommandWithPipes(ctx, name, args...)
+	return runCommandWithPipes(ctx, opts, name, args...)
 }
 
-func runCommandWithPipes(ctx context.Context, name string, args ...string) processResult {
+func runCommandWithPipes(ctx context.Context, opts commandOptions, name string, args ...string) processResult {
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, name, args...)
+	applyCommandOptions(cmd, opts)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -100,9 +110,16 @@ func runCommandWithPipes(ctx context.Context, name string, args ...string) proce
 	}
 }
 
-func runCommandWithTTY(ctx context.Context, name string, args ...string) processResult {
+func applyCommandOptions(cmd *exec.Cmd, opts commandOptions) {
+	if len(opts.env) > 0 {
+		cmd.Env = append(os.Environ(), opts.env...)
+	}
+}
+
+func runCommandWithTTY(ctx context.Context, opts commandOptions, name string, args ...string) processResult {
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, name, args...)
+	applyCommandOptions(cmd, opts)
 
 	ptmx, tty, err := pty.Open()
 	if err != nil {
@@ -207,6 +224,14 @@ func run(ctx context.Context, args []string, stdout io.Writer, logger *slog.Logg
 		return err
 	}
 
+	if cfg.asan {
+		runtime, err := locateASANRuntime()
+		if err != nil {
+			return err
+		}
+		cfg.asanRuntime = runtime
+	}
+
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -269,6 +294,7 @@ func parseArgs(args []string, output io.Writer) (config, error) {
 	flags.StringVar(&mojoBuildArgs, "mojo-build-args", "", "space-separated arguments passed to mojo build")
 	flags.BoolVar(&cfg.keepArtifacts, "keep-artifacts", false, "keep compiled binaries and print the artifact directory")
 	flags.BoolVar(&cfg.noColor, "no-color", false, "disable colored output")
+	flags.BoolVar(&cfg.asan, "asan", false, "build and run tests with AddressSanitizer enabled")
 	flags.BoolVar(&cfg.showVersion, "version", false, "print version and exit")
 
 	if err := flags.Parse(reorderOptions(args)); err != nil {
@@ -357,8 +383,65 @@ func printUsage(output io.Writer, defaultParallel int) {
 	fmt.Fprintf(output, "  --mojo-build-args VALUE   space-separated arguments passed to mojo build\n")
 	fmt.Fprintf(output, "  --keep-artifacts          keep compiled binaries and print the artifact directory\n")
 	fmt.Fprintf(output, "  --no-color                disable colored output\n")
+	fmt.Fprintf(output, "  --asan                    build and run tests with AddressSanitizer enabled\n")
 	fmt.Fprintf(output, "  --version                 print version and exit\n")
 	fmt.Fprintf(output, "  --help                    display this help and exit\n")
+}
+
+func locateASANRuntime() (asanRuntime, error) {
+	platform := runtime.GOOS + "/" + runtime.GOARCH
+	var libName, preloadVar, hint string
+	switch platform {
+	case "darwin/arm64":
+		libName = "libclang_rt.asan_osx_dynamic.dylib"
+		preloadVar = "DYLD_INSERT_LIBRARIES"
+		hint = "Install it with: pixi add compiler-rt --platform osx-arm64"
+	case "linux/amd64":
+		libName = "libclang_rt.asan-x86_64.so"
+		preloadVar = "LD_PRELOAD"
+		hint = "Install it with: pixi add compiler-rt --platform linux-64"
+	default:
+		return asanRuntime{}, fmt.Errorf("AddressSanitizer runtime lookup is not configured for %s", platform)
+	}
+
+	libPath, err := findFirst(filepath.Join(".pixi", "envs", "test"), libName)
+	if err != nil {
+		return asanRuntime{}, fmt.Errorf("find AddressSanitizer runtime: %w", err)
+	}
+	if libPath == "" {
+		return asanRuntime{}, fmt.Errorf("compatible AddressSanitizer runtime not found for %s. %s", platform, hint)
+	}
+
+	return asanRuntime{
+		libPath:    libPath,
+		preloadVar: preloadVar,
+		buildArgs:  []string{"--external-libasan", libPath},
+	}, nil
+}
+
+func findFirst(root, name string) (string, error) {
+	if _, err := os.Stat(root); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+
+	var match string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		if d.Name() == name {
+			match = path
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	return match, err
 }
 
 func discoverTests(dir string) ([]string, error) {
@@ -434,9 +517,14 @@ func runOne(ctx context.Context, cfg config, artifactDir, path string, executor 
 		binaryPath: binaryPathFor(artifactDir, path),
 	}
 
-	buildArgs := make([]string, 0, 3+len(cfg.mojoBuildArgs))
+	useASAN := cfg.asan && !fileSkipsASAN(path)
+	buildArgs := make([]string, 0, 6+len(cfg.mojoBuildArgs)+len(cfg.asanRuntime.buildArgs))
 	buildArgs = append(buildArgs, "build")
 	buildArgs = append(buildArgs, cfg.mojoBuildArgs...)
+	if useASAN {
+		buildArgs = append(buildArgs, "--sanitize", "address")
+		buildArgs = append(buildArgs, cfg.asanRuntime.buildArgs...)
+	}
 	buildArgs = append(buildArgs, "-o", result.binaryPath, path)
 	result.compileCmd = append([]string{"mojo"}, buildArgs...)
 
@@ -446,7 +534,37 @@ func runOne(ctx context.Context, cfg config, artifactDir, path string, executor 
 	}
 
 	result.didRun = true
-	result.run = executor.Run(ctx, commandOptions{fakeTTY: true}, result.binaryPath)
+	runOptions := commandOptions{fakeTTY: true}
+	if useASAN {
+		runOptions.env = []string{cfg.asanRuntime.preloadVar + "=" + cfg.asanRuntime.libPath}
+	}
+	result.run = executor.Run(ctx, runOptions, result.binaryPath)
+	if useASAN && asanReported(result.run) {
+		result.run = markASANFailure(result.run)
+	}
+	return result
+}
+
+func fileSkipsASAN(path string) bool {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(content), "# SKIP_ASAN")
+}
+
+func asanReported(result processResult) bool {
+	output := result.stdout + result.stderr
+	return strings.Contains(output, "ERROR:") && strings.Contains(output, "AddressSanitizer")
+}
+
+func markASANFailure(result processResult) processResult {
+	if result.exitCode == 0 {
+		result.exitCode = 1
+	}
+	if result.err == nil {
+		result.err = errors.New("AddressSanitizer error detected")
+	}
 	return result
 }
 

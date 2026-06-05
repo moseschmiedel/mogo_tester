@@ -24,6 +24,7 @@ Useful flags:
 --mojo-build-args VALUE   space-separated arguments passed to mojo build
 --keep-artifacts          keep compiled binaries and print the artifact directory
 --no-color                disable colored output
+--asan                    build and run tests with AddressSanitizer enabled
 --version                 print version and exit
 --help                    display help and exit
 ```
@@ -33,6 +34,17 @@ Example:
 ```sh
 go run ./cmd/mogo-tester --parallel 4 --mojo-build-args "-I src" test
 ```
+
+AddressSanitizer is opt-in:
+
+```sh
+go run ./cmd/mogo-tester --asan --mojo-build-args "-I src" test
+```
+
+`--asan` looks for the compatible compiler-rt runtime under `.pixi/envs/test`.
+Install it with `pixi add compiler-rt --platform osx-arm64` on Apple silicon
+macOS or `pixi add compiler-rt --platform linux-64` on Linux x86_64. To disable
+ASAN for one Mojo file, add `# SKIP_ASAN` anywhere in that file.
 
 ## Test
 
