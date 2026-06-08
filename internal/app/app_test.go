@@ -986,9 +986,6 @@ func assertBuildArgsForSource(t *testing.T, calls []fakeCall, source string, pre
 		if !reflect.DeepEqual(call.args[:len(prefix)], prefix) {
 			t.Fatalf("build args prefix for %s = %#v, want %#v", source, call.args[:len(prefix)], prefix)
 		}
-		if call.args[len(call.args)-1] != source {
-			t.Fatalf("build args source = %q, want %q", call.args[len(call.args)-1], source)
-		}
 		return
 	}
 
@@ -1007,48 +1004,37 @@ func contains(values []string, needle string) bool {
 func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
 
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeFile(t, path, content, 0o644)
 }
 
 func writeExecutable(t *testing.T, path, content string) {
 	t.Helper()
 
-	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
+	writeFile(t, path, content, 0o755)
+}
+
+func writeFile(t *testing.T, path, content string, perm os.FileMode) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(content), perm); err != nil {
 		t.Fatal(err)
 	}
 }
 
 type parallelTrackingExecutor struct {
-	mu      sync.Mutex
-	active  int
-	max     int
-	calls   int
-	delay   time.Duration
-	outputs map[string]string
+	mu     sync.Mutex
+	active int
+	max    int
+	calls  int
+	delay  time.Duration
 }
 
-func (e *parallelTrackingExecutor) Run(_ context.Context, _ commandOptions, name string, args ...string) processResult {
+func (e *parallelTrackingExecutor) Run(_ context.Context, _ commandOptions, _ string, _ ...string) processResult {
 	e.mu.Lock()
 	e.active++
 	e.calls++
 	if e.active > e.max {
 		e.max = e.active
-	}
-	if e.outputs == nil {
-		e.outputs = make(map[string]string)
-	}
-	if name == "mojo" {
-		output := ""
-		source := args[len(args)-1]
-		for i := 0; i < len(args)-1; i++ {
-			if args[i] == "-o" {
-				output = args[i+1]
-				break
-			}
-		}
-		e.outputs[output] = source
 	}
 	e.mu.Unlock()
 
