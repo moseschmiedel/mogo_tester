@@ -1,0 +1,138 @@
+package app
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
+)
+
+type asanRuntime struct {
+	libPath    string
+	preloadVar string
+	buildArgs  []string
+}
+
+func locateASANRuntime() (asanRuntime, error) {
+	clangCmd := os.Getenv("CC")
+	if clangCmd == "" {
+		clangCmd = "clang"
+	}
+	return locateASANRuntimeWith(runtime.GOOS+"/"+runtime.GOARCH, clangCmd)
+}
+
+func locateASANRuntimeWith(platform, clangCmd string) (asanRuntime, error) {
+	var pattern, preloadVar, hint string
+	switch platform {
+	case "darwin/arm64":
+		pattern = "libclang_rt.asan_osx_dynamic.dylib"
+		preloadVar = "DYLD_INSERT_LIBRARIES"
+		hint = "Install it with: pixi add compiler-rt --platform osx-arm64"
+	case "linux/amd64":
+		pattern = "libclang_rt.asan*.so"
+		preloadVar = "LD_PRELOAD"
+		hint = "Install it with: pixi add compiler-rt --platform linux-64"
+	default:
+		return asanRuntime{}, fmt.Errorf("AddressSanitizer runtime lookup is not configured for %s", platform)
+	}
+
+	resourceDir, resolveErr := resolveClangResourceDir(clangCmd)
+	var libPath string
+	var findErr error
+	if resolveErr == nil {
+		libPath, findErr = findFirstMatching(filepath.Join(resourceDir, "lib"), pattern)
+	}
+	if findErr != nil {
+		return asanRuntime{}, fmt.Errorf("find AddressSanitizer runtime: %w", findErr)
+	}
+	if libPath == "" {
+		message := fmt.Sprintf("compatible AddressSanitizer runtime not found for %s\nCompiler queried: %s --print-resource-dir", platform, clangCmd)
+		if resourceDir != "" {
+			message += fmt.Sprintf("\nCompiler resource dir: %s\nSearched below: %s", resourceDir, filepath.Join(resourceDir, "lib"))
+		} else {
+			message += "\nCompiler resource dir: <unavailable>"
+		}
+		message += "\n" + hint
+		if resolveErr != nil {
+			message += fmt.Sprintf("\nResolve error: %v", resolveErr)
+		}
+		return asanRuntime{}, errors.New(message)
+	}
+
+	return asanRuntime{
+		libPath:    libPath,
+		preloadVar: preloadVar,
+		buildArgs:  []string{"--external-libasan", libPath},
+	}, nil
+}
+
+func resolveClangResourceDir(clangCmd string) (string, error) {
+	output, err := exec.Command(clangCmd, "--print-resource-dir").Output()
+	if err != nil {
+		return "", err
+	}
+	resourceDir := strings.TrimSpace(string(output))
+	if resourceDir == "" {
+		return "", errors.New("empty compiler resource directory")
+	}
+	return resourceDir, nil
+}
+
+func findFirstMatching(root, pattern string) (string, error) {
+	if _, err := os.Stat(root); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+
+	var matches []string
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return nil
+		}
+		ok, err := filepath.Match(pattern, d.Name())
+		if err != nil {
+			return err
+		}
+		if ok {
+			matches = append(matches, path)
+		}
+		return nil
+	})
+	if err != nil || len(matches) == 0 {
+		return "", err
+	}
+	sort.Strings(matches)
+	return matches[0], nil
+}
+
+func fileSkipsASAN(path string) bool {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(content), "# SKIP_ASAN")
+}
+
+func asanReported(result processResult) bool {
+	output := result.stdout + result.stderr
+	return strings.Contains(output, "ERROR:") && strings.Contains(output, "AddressSanitizer")
+}
+
+func markASANFailure(result processResult) processResult {
+	if result.exitCode == 0 {
+		result.exitCode = 1
+	}
+	if result.err == nil {
+		result.err = errors.New("AddressSanitizer error detected")
+	}
+	return result
+}
