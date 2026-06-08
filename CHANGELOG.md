@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-06-08
+
 ### Changed
 
 - Documented that `clang` is required for AddressSanitizer runtime discovery
