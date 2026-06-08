@@ -12,7 +12,7 @@ All notable changes to this project will be documented in this file.
   AddressSanitizer, troubleshooting, and development guidance.
 - Added Go doc comments and package documentation for the main application
   flow, argument parsing, runner, reporting, command execution, and
-  AddressSanitizer helpers.
+  AddressSanitizer helpers, following the current Go doc comment guide.
 
 ## [2.2.0] - 2026-06-05
 
