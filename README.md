@@ -9,6 +9,7 @@ so terminal-aware test output behaves as it would in an interactive terminal.
 
 - Go 1.26.3 or newer
 - Mojo on `PATH`
+- `clang` on `PATH` when using `--asan`
 
 ## Run
 
@@ -41,10 +42,13 @@ AddressSanitizer is opt-in:
 go run ./cmd/mogo-tester --asan --mojo-build-args "-I src" test
 ```
 
-`--asan` looks for the compatible compiler-rt runtime under `.pixi/envs/test`.
-Install it with `pixi add compiler-rt --platform osx-arm64` on Apple silicon
-macOS or `pixi add compiler-rt --platform linux-64` on Linux x86_64. To disable
-ASAN for one Mojo file, add `# SKIP_ASAN` anywhere in that file.
+`--asan` requires `clang` so `mogo-tester` can query the compiler resource
+directory with `clang --print-resource-dir` and locate the compatible
+compiler-rt runtime from there. If you use a non-default compiler, set `CC` to
+the `clang` executable to query. Install the runtime with
+`pixi add compiler-rt --platform osx-arm64` on Apple silicon macOS or
+`pixi add compiler-rt --platform linux-64` on Linux x86_64. To disable ASAN for
+one Mojo file, add `# SKIP_ASAN` anywhere in that file.
 
 ## Test
 

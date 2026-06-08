@@ -586,6 +586,98 @@ func TestRunOneWithASANAddsSanitizerBuildArgsAndPreload(t *testing.T) {
 	}
 }
 
+func TestLocateASANRuntimeUsesClangResourceDirForDarwinARM64(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake clang script is POSIX-only")
+	}
+	t.Parallel()
+
+	dir := t.TempDir()
+	resourceDir := filepath.Join(dir, "clang-resource")
+	libPath := filepath.Join(resourceDir, "lib", "darwin", "libclang_rt.asan_osx_dynamic.dylib")
+	writeExecutable(t, filepath.Join(dir, "clang"), fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %q\n", resourceDir))
+	if err := os.MkdirAll(filepath.Dir(libPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(libPath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runtime, err := locateASANRuntimeWith("darwin/arm64", filepath.Join(dir, "clang"))
+	if err != nil {
+		t.Fatalf("locateASANRuntimeWith() error = %v", err)
+	}
+	if runtime.libPath != libPath {
+		t.Fatalf("libPath = %q, want %q", runtime.libPath, libPath)
+	}
+	if runtime.preloadVar != "DYLD_INSERT_LIBRARIES" {
+		t.Fatalf("preloadVar = %q, want DYLD_INSERT_LIBRARIES", runtime.preloadVar)
+	}
+	if got, want := runtime.buildArgs, []string{"--external-libasan", libPath}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildArgs = %#v, want %#v", got, want)
+	}
+}
+
+func TestLocateASANRuntimeUsesClangResourceDirForLinuxAMD64(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake clang script is POSIX-only")
+	}
+	t.Parallel()
+
+	dir := t.TempDir()
+	resourceDir := filepath.Join(dir, "clang-resource")
+	firstLibPath := filepath.Join(resourceDir, "lib", "linux", "libclang_rt.asan-aarch64.so")
+	secondLibPath := filepath.Join(resourceDir, "lib", "linux", "libclang_rt.asan-x86_64.so")
+	writeExecutable(t, filepath.Join(dir, "clang"), fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %q\n", resourceDir))
+	if err := os.MkdirAll(filepath.Dir(secondLibPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{secondLibPath, firstLibPath} {
+		if err := os.WriteFile(path, nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runtime, err := locateASANRuntimeWith("linux/amd64", filepath.Join(dir, "clang"))
+	if err != nil {
+		t.Fatalf("locateASANRuntimeWith() error = %v", err)
+	}
+	if runtime.libPath != firstLibPath {
+		t.Fatalf("libPath = %q, want first sorted match %q", runtime.libPath, firstLibPath)
+	}
+	if runtime.preloadVar != "LD_PRELOAD" {
+		t.Fatalf("preloadVar = %q, want LD_PRELOAD", runtime.preloadVar)
+	}
+}
+
+func TestLocateASANRuntimeReportsCompilerResourceDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake clang script is POSIX-only")
+	}
+	t.Parallel()
+
+	dir := t.TempDir()
+	resourceDir := filepath.Join(dir, "clang-resource")
+	clangPath := filepath.Join(dir, "clang")
+	writeExecutable(t, clangPath, fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' %q\n", resourceDir))
+
+	_, err := locateASANRuntimeWith("darwin/arm64", clangPath)
+	if err == nil {
+		t.Fatal("locateASANRuntimeWith() error = nil, want missing runtime error")
+	}
+	for _, want := range []string{
+		"compatible AddressSanitizer runtime not found for darwin/arm64",
+		"Compiler queried: " + clangPath + " --print-resource-dir",
+		"Compiler resource dir: " + resourceDir,
+		"Searched below: " + filepath.Join(resourceDir, "lib"),
+		"pixi add compiler-rt --platform osx-arm64",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error missing %q:\n%s", want, err)
+		}
+	}
+}
+
 func TestRunOneWithASANHonorsSkipComment(t *testing.T) {
 	t.Parallel()
 
@@ -916,6 +1008,14 @@ func writeTestFile(t *testing.T, path, content string) {
 	t.Helper()
 
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeExecutable(t *testing.T, path, content string) {
+	t.Helper()
+
+	if err := os.WriteFile(path, []byte(content), 0o755); err != nil {
 		t.Fatal(err)
 	}
 }

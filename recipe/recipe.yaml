@@ -1,0 +1,43 @@
+context:
+  version: "2.2.0"
+
+package:
+  name: mogo-tester
+  version: ${{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  skip:
+    - win
+
+requirements:
+  build:
+    - ${{ compiler('go-nocgo') }}
+    - go-licenses
+  run:
+    - mojo
+
+tests:
+  - script:
+      - mogo-tester --version
+      - mogo-tester --help
+
+about:
+  homepage: https://github.com/moseschmiedel/mogo_tester
+  repository: https://github.com/moseschmiedel/mogo_tester
+  summary: Compile and run top-level Mojo test files.
+  description: |
+    mogo-tester discovers top-level Mojo files in a directory, compiles each
+    one with mojo build, runs the produced binary, and prints per-file results
+    plus a final summary.
+  license: MIT
+  license_file:
+    - LICENSE
+    - license-files/
+
+extra:
+  recipe-maintainers:
+    - moseschmiedel

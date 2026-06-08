@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Documented that `clang` is required for AddressSanitizer runtime discovery
+  when using `--asan`.
+
 ## [2.2.0] - 2026-06-05
 
 ### Added
