@@ -16,6 +16,9 @@ func Run(ctx context.Context, args []string, stdout io.Writer, logger *slog.Logg
 	return run(ctx, args, stdout, logger, version, execCommandExecutor{})
 }
 
+// run wires argument parsing, ASAN setup, test discovery, artifact lifecycle,
+// and result reporting together. The executor parameter keeps command execution
+// replaceable in tests.
 func run(ctx context.Context, args []string, stdout io.Writer, logger *slog.Logger, version string, executor commandExecutor) error {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(io.Discard, nil))

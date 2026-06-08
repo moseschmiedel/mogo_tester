@@ -17,6 +17,8 @@ type asanRuntime struct {
 	buildArgs  []string
 }
 
+// locateASANRuntime resolves the AddressSanitizer runtime for the current
+// platform using CC when set, or clang otherwise.
 func locateASANRuntime() (asanRuntime, error) {
 	clangCmd := os.Getenv("CC")
 	if clangCmd == "" {
@@ -25,6 +27,8 @@ func locateASANRuntime() (asanRuntime, error) {
 	return locateASANRuntimeWith(runtime.GOOS+"/"+runtime.GOARCH, clangCmd)
 }
 
+// locateASANRuntimeWith queries a clang resource directory and returns the
+// build and preload settings needed to link and run ASAN-enabled Mojo binaries.
 func locateASANRuntimeWith(platform, clangCmd string) (asanRuntime, error) {
 	var pattern, preloadVar, hint string
 	switch platform {
@@ -70,6 +74,8 @@ func locateASANRuntimeWith(platform, clangCmd string) (asanRuntime, error) {
 	}, nil
 }
 
+// resolveClangResourceDir returns the compiler resource directory reported by
+// clang --print-resource-dir.
 func resolveClangResourceDir(clangCmd string) (string, error) {
 	output, err := exec.Command(clangCmd, "--print-resource-dir").Output()
 	if err != nil {
@@ -82,6 +88,8 @@ func resolveClangResourceDir(clangCmd string) (string, error) {
 	return resourceDir, nil
 }
 
+// findFirstMatching walks root and returns the lexicographically first file
+// whose basename matches pattern.
 func findFirstMatching(root, pattern string) (string, error) {
 	if _, err := os.Stat(root); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -114,6 +122,7 @@ func findFirstMatching(root, pattern string) (string, error) {
 	return matches[0], nil
 }
 
+// fileSkipsASAN reports whether a source file contains the opt-out marker.
 func fileSkipsASAN(path string) bool {
 	content, err := os.ReadFile(path)
 	if err != nil {
@@ -122,11 +131,14 @@ func fileSkipsASAN(path string) bool {
 	return strings.Contains(string(content), "# SKIP_ASAN")
 }
 
+// asanReported detects ASAN reports in process output, including cases where
+// the binary exits with status zero despite printing an error.
 func asanReported(result processResult) bool {
 	output := result.stdout + result.stderr
 	return strings.Contains(output, "ERROR:") && strings.Contains(output, "AddressSanitizer")
 }
 
+// markASANFailure converts an ASAN report into a failed process result.
 func markASANFailure(result processResult) processResult {
 	if result.exitCode == 0 {
 		result.exitCode = 1

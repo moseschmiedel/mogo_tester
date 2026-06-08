@@ -33,6 +33,8 @@ type progressUpdate struct {
 	stage testStage
 }
 
+// printEvents consumes worker events, renders progress and per-file result
+// blocks, and sends the final summary back to the runner.
 func printEvents(stdout io.Writer, events <-chan runEvent, start time.Time, colorEnabled bool, total int, done chan<- printOutcome) {
 	summary := runSummary{}
 	var err error
@@ -101,6 +103,8 @@ type progressTracker struct {
 	stages    map[string]testStage
 }
 
+// newProgressTracker creates progress state for a run with total scheduled
+// test files.
 func newProgressTracker(total int) progressTracker {
 	return progressTracker{
 		total:  total,
@@ -108,6 +112,8 @@ func newProgressTracker(total int) progressTracker {
 	}
 }
 
+// update records the latest stage for a file and increments the completed count
+// when that file leaves the active set.
 func (p *progressTracker) update(update progressUpdate) {
 	if update.stage == stageDone {
 		if _, ok := p.stages[update.path]; ok {
@@ -119,6 +125,8 @@ func (p *progressTracker) update(update progressUpdate) {
 	p.stages[update.path] = update.stage
 }
 
+// printProgress writes either an in-place terminal progress line or a plain
+// newline-terminated line for redirected output.
 func printProgress(w io.Writer, progress progressTracker, live bool) error {
 	line := formatProgress(progress)
 	if live {
@@ -129,11 +137,15 @@ func printProgress(w io.Writer, progress progressTracker, live bool) error {
 	return err
 }
 
+// clearProgress erases the current terminal progress line before printing a
+// result block.
 func clearProgress(w io.Writer) error {
 	_, err := fmt.Fprint(w, "\r\x1b[2K")
 	return err
 }
 
+// formatProgress renders active compile and run stages followed by the
+// completed/total counter.
 func formatProgress(progress progressTracker) string {
 	parts := make([]string, 0, 3)
 	if compiling := progress.pathsFor(stageCompiling); len(compiling) > 0 {
@@ -147,6 +159,8 @@ func formatProgress(progress progressTracker) string {
 	return strings.Join(parts, ", ")
 }
 
+// isTerminal reports whether w is a character device that supports live
+// progress updates.
 func isTerminal(w io.Writer) bool {
 	file, ok := w.(*os.File)
 	if !ok {
@@ -159,6 +173,7 @@ func isTerminal(w io.Writer) bool {
 	return info.Mode()&os.ModeCharDevice != 0
 }
 
+// pathsFor returns sorted basenames for files currently in stage.
 func (p progressTracker) pathsFor(stage testStage) []string {
 	var paths []string
 	for path, current := range p.stages {
@@ -170,6 +185,8 @@ func (p progressTracker) pathsFor(stage testStage) []string {
 	return paths
 }
 
+// printResultBlock writes the compile command, process output, and final
+// PASS/FAIL status for one source file.
 func printResultBlock(w io.Writer, result fileResult, colors outputColors) error {
 	if _, err := fmt.Fprintf(w, "%s\n", colors.header(fmt.Sprintf("=== %s ===", result.path))); err != nil {
 		return err
@@ -198,6 +215,8 @@ func printResultBlock(w io.Writer, result fileResult, colors outputColors) error
 	return err
 }
 
+// printProcess writes status and captured output for one compile or run
+// process.
 func printProcess(w io.Writer, label string, result processResult, colors outputColors) error {
 	status := "PASS"
 	statusText := colors.pass(status)
@@ -221,6 +240,8 @@ func printProcess(w io.Writer, label string, result processResult, colors output
 	return nil
 }
 
+// printCaptured writes a labeled captured-output section and normalizes missing
+// trailing newlines so following report lines remain readable.
 func printCaptured(w io.Writer, label, value string) error {
 	if _, err := fmt.Fprintf(w, "%s:\n", label); err != nil {
 		return err
@@ -238,6 +259,7 @@ func printCaptured(w io.Writer, label, value string) error {
 	return nil
 }
 
+// printSummary writes the final aggregate counters for the whole run.
 func printSummary(w io.Writer, summary runSummary, colors outputColors) error {
 	_, err := fmt.Fprintf(
 		w,
@@ -291,6 +313,8 @@ func (c outputColors) wrap(code, value string) string {
 	return code + value + "\x1b[0m"
 }
 
+// formatCommand renders command arguments for display only; execution uses the
+// original argv slice without shell interpolation.
 func formatCommand(args []string) string {
 	quoted := make([]string, len(args))
 	for i, arg := range args {
@@ -299,6 +323,7 @@ func formatCommand(args []string) string {
 	return strings.Join(quoted, " ")
 }
 
+// quoteArg applies simple POSIX-style single-quote escaping for report output.
 func quoteArg(arg string) string {
 	if arg == "" {
 		return "''"
@@ -311,6 +336,8 @@ func quoteArg(arg string) string {
 	return "'" + strings.ReplaceAll(arg, "'", `'\''`) + "'"
 }
 
+// stderrWithError appends the Go execution error to stderr when the process
+// failed without already exposing that message in captured output.
 func stderrWithError(result processResult) string {
 	if result.err == nil {
 		return result.stderr
@@ -324,6 +351,8 @@ func stderrWithError(result processResult) string {
 	return result.stderr + "\n" + result.err.Error()
 }
 
+// combinedOutputWithError returns PTY-combined output, falling back to the
+// execution error when the process produced no bytes.
 func combinedOutputWithError(result processResult) string {
 	if result.err == nil || result.stdout != "" {
 		return result.stdout

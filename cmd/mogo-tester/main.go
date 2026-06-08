@@ -13,6 +13,9 @@ import (
 )
 
 var (
+	// version, commit, and date are populated by release builds through
+	// -ldflags. Local builds keep these defaults and may fall back to Go build
+	// metadata instead.
 	version = "dev"
 	commit  = "unknown"
 	date    = "unknown"
@@ -32,6 +35,9 @@ func main() {
 	}
 }
 
+// resolvedVersion returns the version string shown by --version, preferring
+// release-time ldflags and falling back to embedded Go VCS metadata when
+// available.
 func resolvedVersion() string {
 	v := version
 	c := commit
@@ -57,6 +63,8 @@ func resolvedVersion() string {
 	return formatVersion(v, c, d)
 }
 
+// buildSetting returns a single debug build setting, or fallback when the
+// setting is absent from the current binary.
 func buildSetting(info *debug.BuildInfo, key, fallback string) string {
 	for _, setting := range info.Settings {
 		if setting.Key == key && setting.Value != "" {
@@ -66,6 +74,8 @@ func buildSetting(info *debug.BuildInfo, key, fallback string) string {
 	return fallback
 }
 
+// formatVersion joins the semantic version with optional commit and build date
+// metadata while omitting empty or unknown fields.
 func formatVersion(version, commit, date string) string {
 	fields := []string{version}
 	if commit != "" && commit != "unknown" {

@@ -8,6 +8,11 @@ All notable changes to this project will be documented in this file.
 
 - Documented that `clang` is required for AddressSanitizer runtime discovery
   when using `--asan`.
+- Expanded the README with installation, usage, output, exit status,
+  AddressSanitizer, troubleshooting, and development guidance.
+- Added Go doc comments and package documentation for the main application
+  flow, argument parsing, runner, reporting, command execution, and
+  AddressSanitizer helpers.
 
 ## [2.2.0] - 2026-06-05
 

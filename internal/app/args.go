@@ -21,15 +21,19 @@ type config struct {
 
 type repeatableStrings []string
 
+// String implements flag.Value for repeatable string flags.
 func (r *repeatableStrings) String() string {
 	return strings.Join(*r, ",")
 }
 
+// Set appends one flag occurrence to the accumulated values.
 func (r *repeatableStrings) Set(value string) error {
 	*r = append(*r, value)
 	return nil
 }
 
+// parseArgs converts CLI arguments into runtime configuration and validates
+// user-facing constraints such as the required test directory and parallelism.
 func parseArgs(args []string, output io.Writer) (config, error) {
 	cfg := config{parallel: runtime.NumCPU()}
 	var mojoBuildArgs string
@@ -73,6 +77,9 @@ func parseArgs(args []string, output io.Writer) (config, error) {
 	return cfg, nil
 }
 
+// reorderOptions accepts options before or after TEST-DIR by moving all options
+// before a synthetic "--" delimiter, while preserving operands as directory
+// arguments.
 func reorderOptions(args []string) []string {
 	valueOptions := map[string]bool{
 		"parallel":        true,
@@ -111,10 +118,13 @@ func reorderOptions(args []string) []string {
 	return normalized
 }
 
+// isOption reports whether arg should be treated as an option token.
 func isOption(arg string) bool {
 	return strings.HasPrefix(arg, "-") && arg != "-"
 }
 
+// optionName returns the normalized option name and whether it used --name=value
+// syntax.
 func optionName(arg string) (string, bool) {
 	name := strings.TrimLeft(arg, "-")
 	beforeValue, _, hasValue := strings.Cut(name, "=")
@@ -124,6 +134,8 @@ func optionName(arg string) (string, bool) {
 	return name, false
 }
 
+// printUsage writes the command help text with the platform-specific default
+// parallelism value.
 func printUsage(output io.Writer, defaultParallel int) {
 	fmt.Fprintf(output, "Usage: mogo-tester [OPTION...] TEST-DIR\n\n")
 	fmt.Fprintf(output, "Compile and run top-level Mojo test files in TEST-DIR.\n\n")

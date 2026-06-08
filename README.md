@@ -5,19 +5,52 @@ with `mojo build`, runs the produced binary, and prints per-file results plus a
 final summary. Compiled test binaries run with fake TTY-backed stdout and stderr
 so terminal-aware test output behaves as it would in an interactive terminal.
 
+It is intended for Mojo projects that organize executable test files in a
+directory, for example `test/*.mojo`, and want a single command that builds and
+runs each file independently.
+
 ## Requirements
 
 - Go 1.26.3 or newer
 - Mojo on `PATH`
 - `clang` on `PATH` when using `--asan`
 
-## Run
+## Installation
+
+Build a local binary from this repository:
 
 ```sh
-go run ./cmd/mogo-tester [OPTION...] TEST-DIR
+make build
 ```
 
-Useful flags:
+The binary is written to `bin/mogo-tester`.
+
+For ad hoc usage without installing the binary:
+
+```sh
+go run ./cmd/mogo-tester --help
+```
+
+## Usage
+
+```sh
+mogo-tester [OPTION...] TEST-DIR
+```
+
+`TEST-DIR` must contain one or more top-level `.mojo` files. Subdirectories are
+not searched. Files are discovered in sorted path order, then compiled and run
+with up to `--parallel` workers.
+
+Each test file is compiled with:
+
+```sh
+mojo build [MOJO-BUILD-ARGS...] -o ARTIFACT TEST-FILE
+```
+
+If compilation succeeds, `mogo-tester` runs the compiled artifact. A compile
+failure skips the run step for that file.
+
+### Options
 
 ```text
 --parallel N              maximum concurrent compile/run jobs (default: CPU count)
@@ -30,36 +63,141 @@ Useful flags:
 --help                    display help and exit
 ```
 
-Example:
+Options may appear before or after `TEST-DIR`. Use `--` if the test directory
+itself starts with a dash.
+
+### Examples
 
 ```sh
-go run ./cmd/mogo-tester --parallel 4 --mojo-build-args "-I src" test
+mogo-tester --parallel 4 --mojo-build-args "-I src" test
 ```
+
+Prefer repeated `--mojo-build-arg` flags when arguments need exact shell-safe
+token boundaries:
+
+```sh
+mogo-tester test --mojo-build-arg -I --mojo-build-arg src
+```
+
+Keep compiled binaries for inspection:
+
+```sh
+mogo-tester --keep-artifacts test
+```
+
+Disable ANSI color codes for logs or CI output:
+
+```sh
+mogo-tester --no-color test
+```
+
+## Output And Exit Status
+
+During a run, `mogo-tester` prints progress for files currently compiling
+(`C`) and running (`R`). On an interactive terminal this progress line is
+updated in place; when output is redirected, progress lines are printed as
+ordinary lines.
+
+Each file gets a result block containing:
+
+- The full `mojo build` command.
+- Compile status, exit code, duration, stdout, and stderr.
+- Run status, exit code, duration, and output when compilation succeeded.
+- A final per-file `PASS` or `FAIL`.
+
+The final line is a machine-readable summary:
+
+```text
+Summary: total=3 passed=2 failed_compile=1 failed_run=0 elapsed=1.23s
+```
+
+The process exits with status `0` only when all discovered files compile and
+run successfully. Compile failures and run failures both produce a non-zero
+exit status.
+
+## AddressSanitizer
 
 AddressSanitizer is opt-in:
 
 ```sh
-go run ./cmd/mogo-tester --asan --mojo-build-args "-I src" test
+mogo-tester --asan --mojo-build-args "-I src" test
 ```
 
-`--asan` requires `clang` so `mogo-tester` can query the compiler resource
-directory with `clang --print-resource-dir` and locate the compatible
-compiler-rt runtime from there. If you use a non-default compiler, set `CC` to
-the `clang` executable to query. Install the runtime with
-`pixi add compiler-rt --platform osx-arm64` on Apple silicon macOS or
-`pixi add compiler-rt --platform linux-64` on Linux x86_64. To disable ASAN for
-one Mojo file, add `# SKIP_ASAN` anywhere in that file.
+When `--asan` is enabled, each eligible test is built with:
 
-## Test
-
-```sh
-GOCACHE="$PWD/.gocache" go test ./...
+```text
+--sanitize address --external-libasan PATH-TO-RUNTIME
 ```
 
-## Build
+The compiled binary is then run with the platform preload variable pointing at
+the same runtime:
+
+- macOS arm64: `DYLD_INSERT_LIBRARIES`
+- Linux x86_64: `LD_PRELOAD`
+
+`mogo-tester` queries `clang --print-resource-dir` to find the compatible
+compiler-rt runtime. If you use a non-default compiler, set `CC` to the `clang`
+executable to query:
 
 ```sh
-go build -o bin/mogo-tester ./cmd/mogo-tester
+CC=/path/to/clang mogo-tester --asan test
+```
+
+Install the runtime with:
+
+```sh
+pixi add compiler-rt --platform osx-arm64
+pixi add compiler-rt --platform linux-64
+```
+
+To disable ASAN for one Mojo file, add this marker anywhere in the file:
+
+```mojo
+# SKIP_ASAN
+```
+
+Currently, ASAN runtime lookup is configured for Apple silicon macOS and Linux
+x86_64.
+
+## Troubleshooting
+
+### No Tests Found
+
+`mogo-tester` only discovers `.mojo` files directly inside `TEST-DIR`. Move the
+test file to the top level of that directory or run `mogo-tester` against the
+directory that contains it.
+
+### Mojo Build Arguments
+
+`--mojo-build-args` is split on whitespace. If an argument contains spaces or
+must be passed as an exact token, use repeated `--mojo-build-arg` flags instead.
+
+### Missing ASAN Runtime
+
+If `--asan` cannot find a runtime, check the compiler being queried:
+
+```sh
+clang --print-resource-dir
+```
+
+Then verify that the compiler resource directory contains the relevant
+`libclang_rt.asan...` runtime below its `lib` directory. If the project uses a
+toolchain-managed compiler, set `CC` to that compiler before running
+`mogo-tester`.
+
+## Development
+
+Run the Go test suite:
+
+```sh
+make test
+```
+
+Format or tidy changes with standard Go tooling:
+
+```sh
+gofmt -w ./cmd ./internal
+make tidy
 ```
 
 For release builds, inject explicit version metadata:

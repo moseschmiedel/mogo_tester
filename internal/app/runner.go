@@ -51,6 +51,8 @@ func (s runSummary) failed() bool {
 	return s.failedCompile > 0 || s.failedRun > 0
 }
 
+// discoverTests returns sorted top-level .mojo files in dir. It intentionally
+// ignores nested directories so each invocation has a predictable test scope.
 func discoverTests(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -73,6 +75,8 @@ func discoverTests(dir string) ([]string, error) {
 	return paths, nil
 }
 
+// runTests schedules discovered paths across the configured worker pool and
+// streams progress and results through the reporting goroutine.
 func runTests(ctx context.Context, cfg config, paths []string, artifactDir string, stdout io.Writer, executor commandExecutor) (runSummary, error) {
 	start := time.Now()
 	jobs := make(chan string)
@@ -119,6 +123,8 @@ func runTests(ctx context.Context, cfg config, paths []string, artifactDir strin
 	return outcome.summary, nil
 }
 
+// runOne compiles one Mojo file, runs the produced binary when compilation
+// succeeds, and records enough detail to print a complete result block.
 func runOne(ctx context.Context, cfg config, artifactDir, path string, executor commandExecutor, events chan<- runEvent) fileResult {
 	result := fileResult{
 		path:       path,
@@ -157,6 +163,8 @@ func runOne(ctx context.Context, cfg config, artifactDir, path string, executor 
 	return result
 }
 
+// binaryPathFor derives a stable, filesystem-safe artifact path for a source
+// file and adds a path hash so identical basenames do not collide.
 func binaryPathFor(artifactDir, path string) string {
 	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	base = sanitizeBinaryName(base)
@@ -168,6 +176,8 @@ func binaryPathFor(artifactDir, path string) string {
 	return filepath.Join(artifactDir, name)
 }
 
+// sanitizeBinaryName replaces characters that are awkward or unsafe in binary
+// filenames while keeping readable ASCII names intact.
 func sanitizeBinaryName(name string) string {
 	var b strings.Builder
 	for _, r := range name {

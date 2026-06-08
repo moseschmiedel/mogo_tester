@@ -33,6 +33,8 @@ type commandExecutor interface {
 
 type execCommandExecutor struct{}
 
+// Run executes a command with either ordinary pipes or a fake TTY, falling back
+// to pipes when PTYs are not supported on the platform.
 func (execCommandExecutor) Run(ctx context.Context, opts commandOptions, name string, args ...string) processResult {
 	if opts.fakeTTY {
 		result := runCommandWithTTY(ctx, opts, name, args...)
@@ -43,6 +45,8 @@ func (execCommandExecutor) Run(ctx context.Context, opts commandOptions, name st
 	return runCommandWithPipes(ctx, opts, name, args...)
 }
 
+// runCommandWithPipes captures stdout and stderr separately using ordinary
+// os/exec pipes.
 func runCommandWithPipes(ctx context.Context, opts commandOptions, name string, args ...string) processResult {
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -71,12 +75,15 @@ func runCommandWithPipes(ctx context.Context, opts commandOptions, name string, 
 	}
 }
 
+// applyCommandOptions applies environment overrides to an exec.Cmd.
 func applyCommandOptions(cmd *exec.Cmd, opts commandOptions) {
 	if len(opts.env) > 0 {
 		cmd.Env = append(os.Environ(), opts.env...)
 	}
 }
 
+// runCommandWithTTY captures stdout and stderr through a pseudo-terminal so
+// terminal-aware test binaries behave like they are running interactively.
 func runCommandWithTTY(ctx context.Context, opts commandOptions, name string, args ...string) processResult {
 	start := time.Now()
 	cmd := exec.CommandContext(ctx, name, args...)
@@ -124,10 +131,14 @@ func runCommandWithTTY(ctx context.Context, opts commandOptions, name string, ar
 	}
 }
 
+// normalizePTYOutput converts CRLF sequences produced by PTY-backed commands to
+// LF so report output is stable across platforms.
 func normalizePTYOutput(output string) string {
 	return strings.ReplaceAll(output, "\r\n", "\n")
 }
 
+// commandSucceeded reports whether command execution completed with exit code
+// zero and no execution error.
 func commandSucceeded(result processResult) bool {
 	return result.err == nil && result.exitCode == 0
 }
