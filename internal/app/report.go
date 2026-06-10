@@ -215,6 +215,22 @@ func printResultBlock(w io.Writer, result fileResult, colors outputColors) error
 	return err
 }
 
+// printPrecompileBlock writes the setup command and captured output for one
+// precompiled Mojo package.
+func printPrecompileBlock(w io.Writer, path string, command []string, result processResult, colors outputColors) error {
+	if _, err := fmt.Fprintf(w, "%s\n", colors.header(fmt.Sprintf("=== precompile %s ===", path))); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(w, "%s %s\n", colors.label("precompile command:"), colors.dim(formatCommand(command))); err != nil {
+		return err
+	}
+	if err := printProcess(w, "precompile", result, colors); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintln(w)
+	return err
+}
+
 // printProcess writes status and captured output for one compile or run
 // process.
 func printProcess(w io.Writer, label string, result processResult, colors outputColors) error {

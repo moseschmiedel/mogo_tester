@@ -174,11 +174,11 @@ func precompileModules(ctx context.Context, cfg config, artifactDir string, stdo
 		args = append(args, "precompile")
 		args = append(args, "-o", outputPath, path)
 
-		result := executor.Run(ctx, commandOptions{}, "mojo", args...)
-		if result.stdout != "" {
-			if _, err := io.WriteString(stdout, result.stdout); err != nil {
-				return fmt.Errorf("print precompile output for %s: %w", path, err)
-			}
+		result := executor.Run(ctx, commandOptions{fakeTTY: true}, "mojo", args...)
+		command := append([]string{"mojo"}, args...)
+		colors := outputColors{enabled: !cfg.noColor}
+		if err := printPrecompileBlock(stdout, path, command, result, colors); err != nil {
+			return fmt.Errorf("print precompile output for %s: %w", path, err)
 		}
 		if !commandSucceeded(result) {
 			if result.err != nil {

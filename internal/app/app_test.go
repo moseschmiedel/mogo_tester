@@ -403,7 +403,7 @@ func TestRunPrecompilesModulesBeforeBuildingTests(t *testing.T) {
 
 	executor := &fakeExecutor{
 		compileBySource: map[string]processResult{
-			module: successResult("precompile shared\n", ""),
+			module: successResult("precompile shared stdout\n", "precompile shared stderr\n"),
 			source: successResult("compile test\n", ""),
 		},
 		runBySource: map[string]processResult{
@@ -432,6 +432,9 @@ func TestRunPrecompilesModulesBeforeBuildingTests(t *testing.T) {
 	if got, want := precompile.name, "mojo"; got != want {
 		t.Fatalf("precompile command name = %q, want %q", got, want)
 	}
+	if !precompile.fakeTTY {
+		t.Fatalf("precompile command fakeTTY = false, want true: %#v", precompile)
+	}
 	precompileOutput := precompileOutputArg(t, precompile)
 	artifactDir := filepath.Dir(precompileOutput)
 	wantPrecompileArgs := []string{"precompile", "-o", filepath.Join(artifactDir, "shared.mojoc"), module}
@@ -441,10 +444,20 @@ func TestRunPrecompilesModulesBeforeBuildingTests(t *testing.T) {
 	assertBuildArgsForSource(t, calls, source, []string{"build", "-I", "src", "--foo", "bar", "-I", artifactDir, "-o"})
 
 	output := stdout.String()
-	if !strings.Contains(output, "precompile shared\n") {
-		t.Fatalf("stdout missing precompile output:\n%s", output)
+	for _, want := range []string{
+		"=== precompile " + module + " ===\n",
+		"precompile command: mojo precompile -o ",
+		"precompile: PASS exit=0",
+		"precompile output:\nprecompile shared stdout\nprecompile shared stderr\n",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, output)
+		}
 	}
-	if precompileIndex, testIndex := strings.Index(output, "precompile shared\n"), strings.Index(output, "compile stdout:\ncompile test\n"); precompileIndex < 0 || testIndex < 0 || precompileIndex > testIndex {
+	stdoutIndex := strings.Index(output, "precompile output:\nprecompile shared stdout\n")
+	stderrIndex := strings.Index(output, "precompile shared stderr\n")
+	testIndex := strings.Index(output, "compile stdout:\ncompile test\n")
+	if stdoutIndex < 0 || stderrIndex < 0 || testIndex < 0 || stdoutIndex > stderrIndex || stderrIndex > testIndex {
 		t.Fatalf("precompile output was not printed before test output:\n%s", output)
 	}
 }
@@ -1288,9 +1301,9 @@ func (f *fakeExecutor) Run(_ context.Context, opts commandOptions, name string, 
 		}
 		f.binaryToSource[output] = source
 		if result, ok := f.compileBySource[source]; ok {
-			return result
+			return fakeCombinedResult(result, opts.fakeTTY)
 		}
-		return successResult("", "")
+		return fakeCombinedResult(successResult("", ""), opts.fakeTTY)
 	}
 
 	source := f.binaryToSource[name]
