@@ -131,6 +131,15 @@ func fileSkipsASAN(path string) bool {
 	return strings.Contains(string(content), "# SKIP_ASAN")
 }
 
+// fileSkipsDebug reports whether a source file contains the debug opt-out marker.
+func fileSkipsDebug(path string) bool {
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(content), "# SKIP_DEBUG")
+}
+
 // asanReported detects ASAN reports in process output, including cases where
 // the binary exits with status zero despite printing an error.
 func asanReported(result processResult) bool {

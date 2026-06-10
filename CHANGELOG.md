@@ -10,6 +10,8 @@ All notable changes to this project will be documented in this file.
   mixed directory/file invocations.
 - Added a repeatable `--precompile` option that runs `mojo precompile` for
   shared packages before compiling tests.
+- Added a `# SKIP_DEBUG` source marker for omitting exact `-g` Mojo build
+  arguments on affected files, addressing issue #1.
 
 ## [2.2.1] - 2026-06-08
 

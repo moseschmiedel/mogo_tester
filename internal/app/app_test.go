@@ -843,6 +843,75 @@ func TestRunUsesFakeTTYForBinaryOnly(t *testing.T) {
 	}
 }
 
+func TestRunOneWithSkipDebugRemovesDebugBuildArg(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "skip_debug.mojo")
+	writeTestFile(t, source, "# SKIP_DEBUG\n")
+
+	executor := &fakeExecutor{}
+	result := runOne(context.Background(), config{
+		mojoBuildArgs: []string{"-I", "src", "-g"},
+	}, t.TempDir(), source, executor, make(chan runEvent, 3))
+	if !result.passed() {
+		t.Fatalf("runOne() failed: %#v", result)
+	}
+
+	calls := executor.callsSnapshot()
+	if len(calls) != 2 {
+		t.Fatalf("executor calls = %d, want 2: %#v", len(calls), calls)
+	}
+	assertBuildArgsForSource(t, calls, source, []string{"build", "-I", "src", "-o"})
+	if contains(calls[0].args, "-g") {
+		t.Fatalf("build args contain debug flag despite skip comment: %#v", calls[0].args)
+	}
+}
+
+func TestRunOneWithSkipDebugPreservesOtherBuildArgsInOrder(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "skip_debug.mojo")
+	writeTestFile(t, source, "# SKIP_DEBUG\n")
+
+	executor := &fakeExecutor{}
+	result := runOne(context.Background(), config{
+		mojoBuildArgs: []string{"-g", "-I", "src", "--foo", "bar", "-g", "-Dmode=debug"},
+	}, t.TempDir(), source, executor, make(chan runEvent, 3))
+	if !result.passed() {
+		t.Fatalf("runOne() failed: %#v", result)
+	}
+
+	calls := executor.callsSnapshot()
+	if len(calls) != 2 {
+		t.Fatalf("executor calls = %d, want 2: %#v", len(calls), calls)
+	}
+	assertBuildArgsForSource(t, calls, source, []string{"build", "-I", "src", "--foo", "bar", "-Dmode=debug", "-o"})
+}
+
+func TestRunOneWithoutSkipDebugKeepsDebugBuildArg(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "debug.mojo")
+	writeTestFile(t, source, "")
+
+	executor := &fakeExecutor{}
+	result := runOne(context.Background(), config{
+		mojoBuildArgs: []string{"-I", "src", "-g"},
+	}, t.TempDir(), source, executor, make(chan runEvent, 3))
+	if !result.passed() {
+		t.Fatalf("runOne() failed: %#v", result)
+	}
+
+	calls := executor.callsSnapshot()
+	if len(calls) != 2 {
+		t.Fatalf("executor calls = %d, want 2: %#v", len(calls), calls)
+	}
+	assertBuildArgsForSource(t, calls, source, []string{"build", "-I", "src", "-g", "-o"})
+}
+
 func TestRunOneWithASANAddsSanitizerBuildArgsAndPreload(t *testing.T) {
 	t.Parallel()
 

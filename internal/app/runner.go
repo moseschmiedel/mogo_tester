@@ -202,7 +202,7 @@ func runOne(ctx context.Context, cfg config, artifactDir, path string, executor 
 	useASAN := cfg.asan && !fileSkipsASAN(path)
 	buildArgs := make([]string, 0, 8+len(cfg.mojoBuildArgs)+len(cfg.asanRuntime.buildArgs))
 	buildArgs = append(buildArgs, "build")
-	buildArgs = append(buildArgs, cfg.mojoBuildArgs...)
+	buildArgs = append(buildArgs, mojoBuildArgsForFile(cfg.mojoBuildArgs, path)...)
 	if cfg.precompileImportDir != "" {
 		buildArgs = append(buildArgs, "-I", cfg.precompileImportDir)
 	}
@@ -232,6 +232,23 @@ func runOne(ctx context.Context, cfg config, artifactDir, path string, executor 
 	}
 	events <- runEvent{progress: progressUpdate{path: path, stage: stageDone}}
 	return result
+}
+
+// mojoBuildArgsForFile returns per-file Mojo build arguments, honoring source
+// markers that opt out of otherwise forwarded arguments.
+func mojoBuildArgsForFile(args []string, path string) []string {
+	if !fileSkipsDebug(path) {
+		return args
+	}
+
+	filtered := make([]string, 0, len(args))
+	for _, arg := range args {
+		if arg == "-g" {
+			continue
+		}
+		filtered = append(filtered, arg)
+	}
+	return filtered
 }
 
 // precompiledPackagePathFor derives the .mojoc path whose filename becomes the

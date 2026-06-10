@@ -204,6 +204,16 @@ file.
 `--mojo-build-args` is split on whitespace. If an argument contains spaces or
 must be passed as an exact token, use repeated `--mojo-build-arg` flags instead.
 
+To disable the exact debug build argument `-g` for one Mojo file, add this marker
+at the top of the file:
+
+```mojo
+# SKIP_DEBUG
+```
+
+This is useful for files affected by Mojo debug-build bugs. Other build
+arguments are preserved exactly and in order.
+
 ### Missing ASAN Runtime
 
 If `--asan` cannot find a runtime, check the compiler being queried:
