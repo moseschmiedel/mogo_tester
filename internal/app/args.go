@@ -9,7 +9,7 @@ import (
 )
 
 type config struct {
-	testDir       string
+	testPaths     []string
 	parallel      int
 	mojoBuildArgs []string
 	keepArtifacts bool
@@ -33,7 +33,7 @@ func (r *repeatableStrings) Set(value string) error {
 }
 
 // parseArgs converts CLI arguments into runtime configuration and validates
-// user-facing constraints such as the required test directory and parallelism.
+// user-facing constraints such as the required test paths and parallelism.
 func parseArgs(args []string, output io.Writer) (config, error) {
 	cfg := config{parallel: runtime.NumCPU()}
 	var mojoBuildArgs string
@@ -63,23 +63,20 @@ func parseArgs(args []string, output io.Writer) (config, error) {
 
 	remaining := flags.Args()
 	if cfg.showVersion {
-		if len(remaining) > 1 {
-			return config{}, fmt.Errorf("usage: mogo-tester [options] <test-dir>")
-		}
 		return cfg, nil
 	}
 
-	if len(remaining) != 1 {
-		return config{}, fmt.Errorf("usage: mogo-tester [options] <test-dir>")
+	if len(remaining) == 0 {
+		return config{}, fmt.Errorf("usage: mogo-tester [options] <test-path>...")
 	}
 
-	cfg.testDir = remaining[0]
+	cfg.testPaths = remaining
 	return cfg, nil
 }
 
-// reorderOptions accepts options before or after TEST-DIR by moving all options
-// before a synthetic "--" delimiter, while preserving operands as directory
-// arguments.
+// reorderOptions accepts options before or after TEST-PATH operands by moving
+// all options before a synthetic "--" delimiter, while preserving operands as
+// test path arguments.
 func reorderOptions(args []string) []string {
 	valueOptions := map[string]bool{
 		"parallel":        true,
@@ -137,8 +134,8 @@ func optionName(arg string) (string, bool) {
 // printUsage writes the command help text with the platform-specific default
 // parallelism value.
 func printUsage(output io.Writer, defaultParallel int) {
-	fmt.Fprintf(output, "Usage: mogo-tester [OPTION...] TEST-DIR\n\n")
-	fmt.Fprintf(output, "Compile and run top-level Mojo test files in TEST-DIR.\n\n")
+	fmt.Fprintf(output, "Usage: mogo-tester [OPTION...] TEST-PATH...\n\n")
+	fmt.Fprintf(output, "Compile and run Mojo test files from directories or direct .mojo files.\n\n")
 	fmt.Fprintf(output, "Options:\n")
 	fmt.Fprintf(output, "  --parallel N              maximum concurrent compile/run jobs (default: %d)\n", defaultParallel)
 	fmt.Fprintf(output, "  --mojo-build-arg VALUE    extra argument passed to mojo build; may be repeated\n")

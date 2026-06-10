@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Allowed one or more test path operands, including direct `.mojo` files and
+  mixed directory/file invocations.
+
 ## [2.2.1] - 2026-06-08
 
 ### Changed

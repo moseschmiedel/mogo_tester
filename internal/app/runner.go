@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-var errNoTests = errors.New("no top-level .mojo files found")
+var errNoTests = errors.New("no .mojo test files found")
 
 type fileResult struct {
 	path       string
@@ -51,9 +51,43 @@ func (s runSummary) failed() bool {
 	return s.failedCompile > 0 || s.failedRun > 0
 }
 
-// discoverTests returns sorted top-level .mojo files in dir. It intentionally
-// ignores nested directories so each invocation has a predictable test scope.
-func discoverTests(dir string) ([]string, error) {
+// discoverTests returns .mojo test files selected by paths. Directory operands
+// contribute sorted top-level .mojo files, while file operands contribute that
+// file directly. Nested directories are intentionally ignored.
+func discoverTests(testPaths []string) ([]string, error) {
+	var paths []string
+	for _, testPath := range testPaths {
+		info, err := os.Stat(testPath)
+		if err != nil {
+			return nil, fmt.Errorf("discover tests in %s: %w", testPath, err)
+		}
+
+		if info.IsDir() {
+			dirPaths, err := discoverTestsInDir(testPath)
+			if err != nil {
+				if errors.Is(err, errNoTests) {
+					continue
+				}
+				return nil, err
+			}
+			paths = append(paths, dirPaths...)
+			continue
+		}
+
+		if !strings.HasSuffix(filepath.Base(testPath), ".mojo") {
+			return nil, fmt.Errorf("test file %s must have .mojo extension", testPath)
+		}
+		paths = append(paths, testPath)
+	}
+
+	if len(paths) == 0 {
+		return nil, fmt.Errorf("%w in %s", errNoTests, strings.Join(testPaths, ", "))
+	}
+
+	return paths, nil
+}
+
+func discoverTestsInDir(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, fmt.Errorf("discover tests in %s: %w", dir, err)

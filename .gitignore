@@ -5,6 +5,7 @@
 *.out
 coverage.out
 .gocache/
+output/
 
 # Local environment
 .env

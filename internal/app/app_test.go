@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-func TestParseArgsRequiresDirectory(t *testing.T) {
+func TestParseArgsRequiresTestPath(t *testing.T) {
 	t.Parallel()
 
 	var stdout bytes.Buffer
@@ -25,7 +25,7 @@ func TestParseArgsRequiresDirectory(t *testing.T) {
 	if err == nil {
 		t.Fatal("parseArgs() error = nil, want error")
 	}
-	if !strings.Contains(err.Error(), "usage: mogo-tester [options] <test-dir>") {
+	if !strings.Contains(err.Error(), "usage: mogo-tester [options] <test-path>...") {
 		t.Fatalf("parseArgs() error = %q, want usage error", err)
 	}
 }
@@ -75,8 +75,8 @@ func TestParseArgsPreservesRepeatedMojoBuildArgs(t *testing.T) {
 	if !cfg.asan {
 		t.Fatal("asan = false, want true")
 	}
-	if cfg.testDir != "tests" {
-		t.Fatalf("testDir = %q, want tests", cfg.testDir)
+	if got, want := cfg.testPaths, []string{"tests"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("testPaths = %#v, want %#v", got, want)
 	}
 }
 
@@ -100,12 +100,13 @@ func TestParseArgsSplitsMojoBuildArgs(t *testing.T) {
 	}
 }
 
-func TestParseArgsAllowsOptionsAfterDirectory(t *testing.T) {
+func TestParseArgsAllowsOptionsAfterTestPaths(t *testing.T) {
 	t.Parallel()
 
 	var stdout bytes.Buffer
 	cfg, err := parseArgs([]string{
 		"tests",
+		"extra.mojo",
 		"--parallel", "2",
 		"--mojo-build-arg", "-I",
 		"--mojo-build-args=src --foo",
@@ -115,8 +116,8 @@ func TestParseArgsAllowsOptionsAfterDirectory(t *testing.T) {
 		t.Fatalf("parseArgs() error = %v", err)
 	}
 
-	if cfg.testDir != "tests" {
-		t.Fatalf("testDir = %q, want tests", cfg.testDir)
+	if got, want := cfg.testPaths, []string{"tests", "extra.mojo"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("testPaths = %#v, want %#v", got, want)
 	}
 	if cfg.parallel != 2 {
 		t.Fatalf("parallel = %d, want 2", cfg.parallel)
@@ -139,8 +140,8 @@ func TestParseArgsHonorsEndOfOptions(t *testing.T) {
 		t.Fatalf("parseArgs() error = %v", err)
 	}
 
-	if cfg.testDir != "--tests" {
-		t.Fatalf("testDir = %q, want --tests", cfg.testDir)
+	if got, want := cfg.testPaths, []string{"--tests"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("testPaths = %#v, want %#v", got, want)
 	}
 }
 
@@ -171,7 +172,7 @@ func TestRunPrintsHelp(t *testing.T) {
 
 	output := stdout.String()
 	for _, want := range []string{
-		"Usage: mogo-tester [OPTION...] TEST-DIR\n",
+		"Usage: mogo-tester [OPTION...] TEST-PATH...\n",
 		"--parallel N",
 		"--mojo-build-arg VALUE",
 		"--mojo-build-args VALUE",
@@ -201,7 +202,7 @@ func TestDiscoverTestsTopLevelOnlySorted(t *testing.T) {
 	}
 	writeTestFile(t, filepath.Join(nested, "ignored.mojo"), "")
 
-	paths, err := discoverTests(dir)
+	paths, err := discoverTests([]string{dir})
 	if err != nil {
 		t.Fatalf("discoverTests() error = %v", err)
 	}
@@ -218,7 +219,100 @@ func TestDiscoverTestsTopLevelOnlySorted(t *testing.T) {
 func TestDiscoverTestsEmptyDirectory(t *testing.T) {
 	t.Parallel()
 
-	_, err := discoverTests(t.TempDir())
+	_, err := discoverTests([]string{t.TempDir()})
+	if !errors.Is(err, errNoTests) {
+		t.Fatalf("discoverTests() error = %v, want errNoTests", err)
+	}
+}
+
+func TestDiscoverTestsDirectFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "direct.mojo")
+	writeTestFile(t, source, "")
+
+	paths, err := discoverTests([]string{source})
+	if err != nil {
+		t.Fatalf("discoverTests() error = %v", err)
+	}
+
+	want := []string{source}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("discoverTests() = %#v, want %#v", paths, want)
+	}
+}
+
+func TestDiscoverTestsMultipleDirectFilesPreservesOperandOrder(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	first := filepath.Join(dir, "b.mojo")
+	second := filepath.Join(dir, "a.mojo")
+	writeTestFile(t, first, "")
+	writeTestFile(t, second, "")
+
+	paths, err := discoverTests([]string{first, second})
+	if err != nil {
+		t.Fatalf("discoverTests() error = %v", err)
+	}
+
+	want := []string{first, second}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("discoverTests() = %#v, want %#v", paths, want)
+	}
+}
+
+func TestDiscoverTestsMixedDirectoryAndFileOperands(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	testDir := filepath.Join(dir, "tests")
+	if err := os.Mkdir(testDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	direct := filepath.Join(dir, "z_direct.mojo")
+	dirSecond := filepath.Join(testDir, "b.mojo")
+	dirFirst := filepath.Join(testDir, "a.mojo")
+	writeTestFile(t, direct, "")
+	writeTestFile(t, dirSecond, "")
+	writeTestFile(t, dirFirst, "")
+
+	paths, err := discoverTests([]string{direct, testDir})
+	if err != nil {
+		t.Fatalf("discoverTests() error = %v", err)
+	}
+
+	want := []string{direct, dirFirst, dirSecond}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("discoverTests() = %#v, want %#v", paths, want)
+	}
+}
+
+func TestDiscoverTestsRejectsDirectNonMojoFile(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "note.txt")
+	writeTestFile(t, source, "")
+
+	_, err := discoverTests([]string{source})
+	if err == nil {
+		t.Fatal("discoverTests() error = nil, want error")
+	}
+	if !strings.Contains(err.Error(), "must have .mojo extension") {
+		t.Fatalf("discoverTests() error = %q, want extension error", err)
+	}
+}
+
+func TestDiscoverTestsMultipleNoTestPaths(t *testing.T) {
+	t.Parallel()
+
+	first := t.TempDir()
+	second := t.TempDir()
+	writeTestFile(t, filepath.Join(first, "note.txt"), "")
+
+	_, err := discoverTests([]string{first, second})
 	if !errors.Is(err, errNoTests) {
 		t.Fatalf("discoverTests() error = %v, want errNoTests", err)
 	}
@@ -287,6 +381,62 @@ func TestRunWithFakeExecutorReportsPassCompileFailureAndRunFailure(t *testing.T)
 	assertBuildArgsForSource(t, calls, pass, []string{"build", "-I", "src", "--foo", "bar", "-o"})
 	assertBuildArgsForSource(t, calls, compileFail, []string{"build", "-I", "src", "--foo", "bar", "-o"})
 	assertBuildArgsForSource(t, calls, runFail, []string{"build", "-I", "src", "--foo", "bar", "-o"})
+}
+
+func TestRunWithFakeExecutorAcceptsMultipleDirectFiles(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	first := filepath.Join(dir, "first.mojo")
+	second := filepath.Join(dir, "second.mojo")
+	writeTestFile(t, first, "")
+	writeTestFile(t, second, "")
+
+	executor := &fakeExecutor{
+		compileBySource: map[string]processResult{
+			first:  successResult("compile first\n", ""),
+			second: successResult("compile second\n", ""),
+		},
+		runBySource: map[string]processResult{
+			first:  successResult("run first\n", ""),
+			second: successResult("run second\n", ""),
+		},
+	}
+
+	var stdout bytes.Buffer
+	err := run(
+		context.Background(),
+		[]string{"--no-color", "--parallel", "1", first, second},
+		&stdout,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		"test",
+		executor,
+	)
+	if err != nil {
+		t.Fatalf("run() error = %v\nstdout:\n%s", err, stdout.String())
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"=== " + first + " ===\n",
+		"=== " + second + " ===\n",
+		"compile stdout:\ncompile first\n",
+		"compile stdout:\ncompile second\n",
+		"run output:\nrun first\n",
+		"run output:\nrun second\n",
+		"Summary: total=2 passed=2 failed_compile=0 failed_run=0",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout missing %q:\n%s", want, output)
+		}
+	}
+
+	calls := executor.callsSnapshot()
+	if len(calls) != 4 {
+		t.Fatalf("executor calls = %d, want 4: %#v", len(calls), calls)
+	}
+	assertBuildArgsForSource(t, calls, first, []string{"build", "-o"})
+	assertBuildArgsForSource(t, calls, second, []string{"build", "-o"})
 }
 
 func TestRunWithFakeMojoExecutable(t *testing.T) {

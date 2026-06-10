@@ -51,7 +51,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, logger *slog.Logg
 	default:
 	}
 
-	paths, err := discoverTests(cfg.testDir)
+	paths, err := discoverTests(cfg.testPaths)
 	if err != nil {
 		return err
 	}
@@ -68,7 +68,7 @@ func run(ctx context.Context, args []string, stdout io.Writer, logger *slog.Logg
 		}()
 	}
 
-	logger.Info("running mojo tests", "dir", cfg.testDir, "count", len(paths), "parallel", cfg.parallel)
+	logger.Info("running mojo tests", "paths", cfg.testPaths, "count", len(paths), "parallel", cfg.parallel)
 
 	summary, err := runTests(ctx, cfg, paths, artifactDir, stdout, executor)
 	if err != nil {

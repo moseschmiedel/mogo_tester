@@ -1,13 +1,14 @@
 # mogo_tester
 
-`mogo-tester` discovers top-level Mojo files in a directory, compiles each one
-with `mojo build`, runs the produced binary, and prints per-file results plus a
-final summary. Compiled test binaries run with fake TTY-backed stdout and stderr
-so terminal-aware test output behaves as it would in an interactive terminal.
+`mogo-tester` discovers Mojo files from directories or direct file paths,
+compiles each one with `mojo build`, runs the produced binary, and prints
+per-file results plus a final summary. Compiled test binaries run with fake
+TTY-backed stdout and stderr so terminal-aware test output behaves as it would
+in an interactive terminal.
 
-It is intended for Mojo projects that organize executable test files in a
-directory, for example `test/*.mojo`, and want a single command that builds and
-runs each file independently.
+It is intended for Mojo projects that organize executable test files in one or
+more directories, direct `.mojo` file paths, or a mix of both, and want a single
+command that builds and runs each file independently.
 
 ## Requirements
 
@@ -34,12 +35,13 @@ go run ./cmd/mogo-tester --help
 ## Usage
 
 ```sh
-mogo-tester [OPTION...] TEST-DIR
+mogo-tester [OPTION...] TEST-PATH...
 ```
 
-`TEST-DIR` must contain one or more top-level `.mojo` files. Subdirectories are
-not searched. Files are discovered in sorted path order, then compiled and run
-with up to `--parallel` workers.
+Each `TEST-PATH` must be either a directory or a direct `.mojo` file. Directory
+operands contribute top-level `.mojo` files in sorted path order; subdirectories
+are not searched. Direct file operands are run in the order provided. The final
+test file list is compiled and run with up to `--parallel` workers.
 
 Each test file is compiled with:
 
@@ -63,13 +65,25 @@ failure skips the run step for that file.
 --help                    display help and exit
 ```
 
-Options may appear before or after `TEST-DIR`. Use `--` if the test directory
+Options may appear before or after `TEST-PATH` operands. Use `--` if a test path
 itself starts with a dash.
 
 ### Examples
 
 ```sh
 mogo-tester --parallel 4 --mojo-build-args "-I src" test
+```
+
+Run specific files:
+
+```sh
+mogo-tester test/basic.mojo test/integration.mojo
+```
+
+Mix directories and direct files:
+
+```sh
+mogo-tester test smoke/single.mojo
 ```
 
 Prefer repeated `--mojo-build-arg` flags when arguments need exact shell-safe
@@ -163,9 +177,10 @@ x86_64.
 
 ### No Tests Found
 
-`mogo-tester` only discovers `.mojo` files directly inside `TEST-DIR`. Move the
-test file to the top level of that directory or run `mogo-tester` against the
-directory that contains it.
+For directory operands, `mogo-tester` only discovers `.mojo` files directly
+inside that directory. Move nested test files to the top level, pass the direct
+`.mojo` file path, or run `mogo-tester` against the directory that contains the
+file.
 
 ### Mojo Build Arguments
 
