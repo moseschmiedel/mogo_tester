@@ -121,14 +121,12 @@ func runTests(ctx context.Context, cfg config, paths []string, artifactDir strin
 
 	var workers sync.WaitGroup
 	for i := 0; i < cfg.parallel; i++ {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
+		workers.Go(func() {
 			for path := range jobs {
 				result := runOne(ctx, cfg, artifactDir, path, executor, events)
 				events <- runEvent{result: &result}
 			}
-		}()
+		})
 	}
 
 	for _, path := range paths {

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -661,7 +662,7 @@ func TestRunHonorsParallelLimit(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		writeTestFile(t, filepath.Join(dir, fmt.Sprintf("%02d.mojo", i)), "")
 	}
 
@@ -1143,12 +1144,7 @@ func assertBuildArgsForSource(t *testing.T, calls []fakeCall, source string, pre
 }
 
 func contains(values []string, needle string) bool {
-	for _, value := range values {
-		if value == needle {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(values, needle)
 }
 
 func writeTestFile(t *testing.T, path, content string) {
