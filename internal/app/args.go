@@ -9,14 +9,16 @@ import (
 )
 
 type config struct {
-	testPaths     []string
-	parallel      int
-	mojoBuildArgs []string
-	keepArtifacts bool
-	noColor       bool
-	showVersion   bool
-	asan          bool
-	asanRuntime   asanRuntime
+	testPaths           []string
+	parallel            int
+	mojoBuildArgs       []string
+	precompilePaths     []string
+	keepArtifacts       bool
+	noColor             bool
+	showVersion         bool
+	asan                bool
+	asanRuntime         asanRuntime
+	precompileImportDir string
 }
 
 type repeatableStrings []string
@@ -46,6 +48,7 @@ func parseArgs(args []string, output io.Writer) (config, error) {
 	flags.IntVar(&cfg.parallel, "parallel", cfg.parallel, "maximum number of tests to compile and run concurrently")
 	flags.Var((*repeatableStrings)(&cfg.mojoBuildArgs), "mojo-build-arg", "additional argument passed to mojo build; may be repeated")
 	flags.StringVar(&mojoBuildArgs, "mojo-build-args", "", "space-separated arguments passed to mojo build")
+	flags.Var((*repeatableStrings)(&cfg.precompilePaths), "precompile", "precompile Mojo package at path before building tests; may be repeated")
 	flags.BoolVar(&cfg.keepArtifacts, "keep-artifacts", false, "keep compiled binaries and print the artifact directory")
 	flags.BoolVar(&cfg.noColor, "no-color", false, "disable colored output")
 	flags.BoolVar(&cfg.asan, "asan", false, "build and run tests with AddressSanitizer enabled")
@@ -82,6 +85,7 @@ func reorderOptions(args []string) []string {
 		"parallel":        true,
 		"mojo-build-arg":  true,
 		"mojo-build-args": true,
+		"precompile":      true,
 	}
 
 	var options []string
@@ -140,6 +144,7 @@ func printUsage(output io.Writer, defaultParallel int) {
 	fmt.Fprintf(output, "  --parallel N              maximum concurrent compile/run jobs (default: %d)\n", defaultParallel)
 	fmt.Fprintf(output, "  --mojo-build-arg VALUE    extra argument passed to mojo build; may be repeated\n")
 	fmt.Fprintf(output, "  --mojo-build-args VALUE   space-separated arguments passed to mojo build\n")
+	fmt.Fprintf(output, "  --precompile PATH         precompile Mojo package before building tests; may be repeated\n")
 	fmt.Fprintf(output, "  --keep-artifacts          keep compiled binaries and print the artifact directory\n")
 	fmt.Fprintf(output, "  --no-color                disable colored output\n")
 	fmt.Fprintf(output, "  --asan                    build and run tests with AddressSanitizer enabled\n")

@@ -46,7 +46,7 @@ test file list is compiled and run with up to `--parallel` workers.
 Each test file is compiled with:
 
 ```sh
-mojo build [MOJO-BUILD-ARGS...] -o ARTIFACT TEST-FILE
+mojo build [MOJO-BUILD-ARGS...] [-I PRECOMPILE-ARTIFACT-DIR] -o ARTIFACT TEST-FILE
 ```
 
 If compilation succeeds, `mogo-tester` runs the compiled artifact. A compile
@@ -58,6 +58,7 @@ failure skips the run step for that file.
 --parallel N              maximum concurrent compile/run jobs (default: CPU count)
 --mojo-build-arg VALUE    extra argument passed to mojo build; repeatable
 --mojo-build-args VALUE   space-separated arguments passed to mojo build
+--precompile PATH         precompile Mojo package before building tests; repeatable
 --keep-artifacts          keep compiled binaries and print the artifact directory
 --no-color                disable colored output
 --asan                    build and run tests with AddressSanitizer enabled
@@ -99,6 +100,12 @@ Keep compiled binaries for inspection:
 mogo-tester --keep-artifacts test
 ```
 
+Precompile a shared Mojo package before compiling tests that import it:
+
+```sh
+mogo-tester --precompile src/shared --mojo-build-args "-I src" test
+```
+
 Disable ANSI color codes for logs or CI output:
 
 ```sh
@@ -128,6 +135,16 @@ Summary: total=3 passed=2 failed_compile=1 failed_run=0 elapsed=1.23s
 The process exits with status `0` only when all discovered files compile and
 run successfully. Compile failures and run failures both produce a non-zero
 exit status.
+
+## Module Precompilation
+
+Use `--precompile PATH` to run `mojo precompile` for one or more Mojo packages
+before test compilation starts. For a package path ending in `shared`,
+`mogo-tester` writes `shared.mojoc` into the temporary artifact directory and
+adds that directory to each later `mojo build` with `-I`.
+
+Duplicate precompile package basenames are rejected because the `.mojoc`
+filename defines the package name used by Mojo imports.
 
 ## AddressSanitizer
 

@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
 
 - Allowed one or more test path operands, including direct `.mojo` files and
   mixed directory/file invocations.
+- Added a repeatable `--precompile` option that runs `mojo precompile` for
+  shared packages before compiling tests.
 
 ## [2.2.1] - 2026-06-08
 

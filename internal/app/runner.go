@@ -155,6 +155,42 @@ func runTests(ctx context.Context, cfg config, paths []string, artifactDir strin
 	return outcome.summary, nil
 }
 
+// precompileModules builds requested Mojo packages into the artifact directory
+// before tests are compiled. The output basename is kept identical to the
+// source package basename because Mojo uses it as the importable package name.
+func precompileModules(ctx context.Context, cfg config, artifactDir string, stdout io.Writer, executor commandExecutor) error {
+	outputByBase := make(map[string]string, len(cfg.precompilePaths))
+	for _, path := range cfg.precompilePaths {
+		base := filepath.Base(filepath.Clean(path))
+		if previous, ok := outputByBase[base]; ok {
+			return fmt.Errorf("precompile package basename %q is used by both %s and %s", base, previous, path)
+		}
+		outputByBase[base] = path
+	}
+
+	for _, path := range cfg.precompilePaths {
+		outputPath := precompiledPackagePathFor(artifactDir, path)
+		args := make([]string, 0, 4)
+		args = append(args, "precompile")
+		args = append(args, "-o", outputPath, path)
+
+		result := executor.Run(ctx, commandOptions{}, "mojo", args...)
+		if result.stdout != "" {
+			if _, err := io.WriteString(stdout, result.stdout); err != nil {
+				return fmt.Errorf("print precompile output for %s: %w", path, err)
+			}
+		}
+		if !commandSucceeded(result) {
+			if result.err != nil {
+				return fmt.Errorf("precompile module %s: %w", path, result.err)
+			}
+			return fmt.Errorf("precompile module %s failed with exit code %d", path, result.exitCode)
+		}
+	}
+
+	return nil
+}
+
 // runOne compiles one Mojo file, runs the produced binary when compilation
 // succeeds, and records enough detail to print a complete result block.
 func runOne(ctx context.Context, cfg config, artifactDir, path string, executor commandExecutor, events chan<- runEvent) fileResult {
@@ -164,9 +200,12 @@ func runOne(ctx context.Context, cfg config, artifactDir, path string, executor 
 	}
 
 	useASAN := cfg.asan && !fileSkipsASAN(path)
-	buildArgs := make([]string, 0, 6+len(cfg.mojoBuildArgs)+len(cfg.asanRuntime.buildArgs))
+	buildArgs := make([]string, 0, 8+len(cfg.mojoBuildArgs)+len(cfg.asanRuntime.buildArgs))
 	buildArgs = append(buildArgs, "build")
 	buildArgs = append(buildArgs, cfg.mojoBuildArgs...)
+	if cfg.precompileImportDir != "" {
+		buildArgs = append(buildArgs, "-I", cfg.precompileImportDir)
+	}
 	if useASAN {
 		buildArgs = append(buildArgs, "--sanitize", "address")
 		buildArgs = append(buildArgs, cfg.asanRuntime.buildArgs...)
@@ -193,6 +232,13 @@ func runOne(ctx context.Context, cfg config, artifactDir, path string, executor 
 	}
 	events <- runEvent{progress: progressUpdate{path: path, stage: stageDone}}
 	return result
+}
+
+// precompiledPackagePathFor derives the .mojoc path whose filename becomes the
+// package name available to later Mojo imports.
+func precompiledPackagePathFor(artifactDir, path string) string {
+	base := filepath.Base(filepath.Clean(path))
+	return filepath.Join(artifactDir, base+".mojoc")
 }
 
 // binaryPathFor derives a stable, filesystem-safe artifact path for a source

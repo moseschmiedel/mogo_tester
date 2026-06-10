@@ -55,6 +55,8 @@ func TestParseArgsPreservesRepeatedMojoBuildArgs(t *testing.T) {
 		"--keep-artifacts",
 		"--no-color",
 		"--asan",
+		"--precompile", "src/math",
+		"--precompile", "src/text",
 		"tests",
 	}, &stdout)
 	if err != nil {
@@ -66,6 +68,9 @@ func TestParseArgsPreservesRepeatedMojoBuildArgs(t *testing.T) {
 	}
 	if got, want := cfg.mojoBuildArgs, []string{"-I", "src"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("mojoBuildArgs = %#v, want %#v", got, want)
+	}
+	if got, want := cfg.precompilePaths, []string{"src/math", "src/text"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("precompilePaths = %#v, want %#v", got, want)
 	}
 	if !cfg.keepArtifacts {
 		t.Fatal("keepArtifacts = false, want true")
@@ -111,6 +116,7 @@ func TestParseArgsAllowsOptionsAfterTestPaths(t *testing.T) {
 		"--parallel", "2",
 		"--mojo-build-arg", "-I",
 		"--mojo-build-args=src --foo",
+		"--precompile", "src/shared",
 		"--no-color",
 	}, &stdout)
 	if err != nil {
@@ -126,6 +132,9 @@ func TestParseArgsAllowsOptionsAfterTestPaths(t *testing.T) {
 	want := []string{"-I", "src", "--foo"}
 	if !reflect.DeepEqual(cfg.mojoBuildArgs, want) {
 		t.Fatalf("mojoBuildArgs = %#v, want %#v", cfg.mojoBuildArgs, want)
+	}
+	if got, want := cfg.precompilePaths, []string{"src/shared"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("precompilePaths = %#v, want %#v", got, want)
 	}
 	if !cfg.noColor {
 		t.Fatal("noColor = false, want true")
@@ -382,6 +391,133 @@ func TestRunWithFakeExecutorReportsPassCompileFailureAndRunFailure(t *testing.T)
 	assertBuildArgsForSource(t, calls, pass, []string{"build", "-I", "src", "--foo", "bar", "-o"})
 	assertBuildArgsForSource(t, calls, compileFail, []string{"build", "-I", "src", "--foo", "bar", "-o"})
 	assertBuildArgsForSource(t, calls, runFail, []string{"build", "-I", "src", "--foo", "bar", "-o"})
+}
+
+func TestRunPrecompilesModulesBeforeBuildingTests(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "uses_shared.mojo")
+	module := filepath.Join(dir, "packages", "shared")
+	writeTestFile(t, source, "")
+
+	executor := &fakeExecutor{
+		compileBySource: map[string]processResult{
+			module: successResult("precompile shared\n", ""),
+			source: successResult("compile test\n", ""),
+		},
+		runBySource: map[string]processResult{
+			source: successResult("run test\n", ""),
+		},
+	}
+
+	var stdout bytes.Buffer
+	err := run(
+		context.Background(),
+		[]string{"--no-color", "--parallel", "1", "--mojo-build-arg", "-I", "--mojo-build-arg", "src", "--mojo-build-args", "--foo bar", "--precompile", module, dir},
+		&stdout,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		"test",
+		executor,
+	)
+	if err != nil {
+		t.Fatalf("run() error = %v\nstdout:\n%s", err, stdout.String())
+	}
+
+	calls := executor.callsSnapshot()
+	if len(calls) != 3 {
+		t.Fatalf("executor calls = %d, want 3: %#v", len(calls), calls)
+	}
+	precompile := calls[0]
+	if got, want := precompile.name, "mojo"; got != want {
+		t.Fatalf("precompile command name = %q, want %q", got, want)
+	}
+	precompileOutput := precompileOutputArg(t, precompile)
+	artifactDir := filepath.Dir(precompileOutput)
+	wantPrecompileArgs := []string{"precompile", "-o", filepath.Join(artifactDir, "shared.mojoc"), module}
+	if !reflect.DeepEqual(precompile.args, wantPrecompileArgs) {
+		t.Fatalf("precompile args = %#v, want %#v", precompile.args, wantPrecompileArgs)
+	}
+	assertBuildArgsForSource(t, calls, source, []string{"build", "-I", "src", "--foo", "bar", "-I", artifactDir, "-o"})
+
+	output := stdout.String()
+	if !strings.Contains(output, "precompile shared\n") {
+		t.Fatalf("stdout missing precompile output:\n%s", output)
+	}
+	if precompileIndex, testIndex := strings.Index(output, "precompile shared\n"), strings.Index(output, "compile stdout:\ncompile test\n"); precompileIndex < 0 || testIndex < 0 || precompileIndex > testIndex {
+		t.Fatalf("precompile output was not printed before test output:\n%s", output)
+	}
+}
+
+func TestRunRejectsDuplicatePrecompileBasenames(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "sample.mojo"), "")
+
+	executor := &fakeExecutor{}
+	first := filepath.Join(dir, "one", "shared")
+	second := filepath.Join(dir, "two", "shared")
+	var stdout bytes.Buffer
+	err := run(
+		context.Background(),
+		[]string{"--precompile", first, "--precompile", second, dir},
+		&stdout,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		"test",
+		executor,
+	)
+	if err == nil {
+		t.Fatal("run() error = nil, want duplicate basename error")
+	}
+	if !strings.Contains(err.Error(), `precompile package basename "shared"`) {
+		t.Fatalf("run() error = %q, want duplicate basename context", err)
+	}
+	if calls := executor.callsSnapshot(); len(calls) != 0 {
+		t.Fatalf("executor calls = %d, want 0: %#v", len(calls), calls)
+	}
+}
+
+func TestRunStopsWhenPrecompileFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	source := filepath.Join(dir, "sample.mojo")
+	module := filepath.Join(dir, "broken")
+	writeTestFile(t, source, "")
+
+	executor := &fakeExecutor{
+		compileBySource: map[string]processResult{
+			module: failResult("", "precompile failed\n"),
+			source: successResult("compile should not run\n", ""),
+		},
+	}
+
+	var stdout bytes.Buffer
+	err := run(
+		context.Background(),
+		[]string{"--no-color", "--precompile", module, dir},
+		&stdout,
+		slog.New(slog.NewTextHandler(io.Discard, nil)),
+		"test",
+		executor,
+	)
+	if err == nil {
+		t.Fatal("run() error = nil, want precompile failure")
+	}
+	if !strings.Contains(err.Error(), "precompile module "+module) {
+		t.Fatalf("run() error = %q, want module context", err)
+	}
+	calls := executor.callsSnapshot()
+	if len(calls) != 1 {
+		t.Fatalf("executor calls = %d, want 1: %#v", len(calls), calls)
+	}
+	if got, want := calls[0].args[0], "precompile"; got != want {
+		t.Fatalf("first command = %q, want %q", got, want)
+	}
+	if strings.Contains(stdout.String(), "Summary:") {
+		t.Fatalf("stdout contains test summary despite precompile failure:\n%s", stdout.String())
+	}
 }
 
 func TestRunWithFakeExecutorAcceptsMultipleDirectFiles(t *testing.T) {
@@ -1141,6 +1277,18 @@ func assertBuildArgsForSource(t *testing.T, calls []fakeCall, source string, pre
 	}
 
 	t.Fatalf("missing build call for %s in %#v", source, calls)
+}
+
+func precompileOutputArg(t *testing.T, call fakeCall) string {
+	t.Helper()
+
+	for i := 0; i < len(call.args)-1; i++ {
+		if call.args[i] == "-o" {
+			return call.args[i+1]
+		}
+	}
+	t.Fatalf("precompile call missing -o output: %#v", call)
+	return ""
 }
 
 func contains(values []string, needle string) bool {

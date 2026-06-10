@@ -68,6 +68,13 @@ func run(ctx context.Context, args []string, stdout io.Writer, logger *slog.Logg
 		}()
 	}
 
+	if len(cfg.precompilePaths) > 0 {
+		if err := precompileModules(ctx, cfg, artifactDir, stdout, executor); err != nil {
+			return err
+		}
+		cfg.precompileImportDir = artifactDir
+	}
+
 	logger.Info("running mojo tests", "paths", cfg.testPaths, "count", len(paths), "parallel", cfg.parallel)
 
 	summary, err := runTests(ctx, cfg, paths, artifactDir, stdout, executor)
