@@ -142,7 +142,7 @@ jobs:
       - name: Build conda package
         uses: prefix-dev/rattler-build-action@v0.2.38
         with:
-          artifact-name: mogo-tester-conda-${{ matrix.target-platform }}
+          artifact-name: conda-mogo-tester-${{ matrix.target-platform }}
           recipe-path: recipe/recipe-mojo-community.yaml
           build-args: --target-platform ${{ matrix.target-platform }} --channel https://repo.prefix.dev/max-nightly --channel conda-forge
 
@@ -175,6 +175,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: mogo-tester-*
           merge-multiple: true
 
       - name: Create GitHub release
@@ -184,7 +185,13 @@ jobs:
         run: |
           set -euo pipefail
 
+          mapfile -t assets < <(find dist -maxdepth 1 -type f \( -name "mogo-tester_*.tar.gz" -o -name "mogo-tester_*.zip" \) | sort)
+          if [[ "${#assets[@]}" -eq 0 ]]; then
+            echo "No release archives found in dist"
+            exit 1
+          fi
+
           gh release create "${GITHUB_REF_NAME}" \
-            dist/* \
+            "${assets[@]}" \
             --title "${GITHUB_REF_NAME}" \
             --notes "Release ${GITHUB_REF_NAME}"
