@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-06-15
+
 ### Added
 
 - CodeQL scanning and status badge in the README.
