@@ -144,7 +144,7 @@ jobs:
         with:
           artifact-name: mogo-tester-conda-${{ matrix.target-platform }}
           recipe-path: recipe/recipe-mojo-community.yaml
-          build-args: --target-platform ${{ matrix.target-platform }}
+          build-args: --target-platform ${{ matrix.target-platform }} --channel https://repo.prefix.dev/max-nightly
 
       - name: Upload package to prefix.dev
         shell: bash
