@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - CodeQL scanning and status badge in the README.
+- Published tagged releases to the `tree-d` prefix.dev channel.
 
 ## [2.3.1] - 2026-06-10
 

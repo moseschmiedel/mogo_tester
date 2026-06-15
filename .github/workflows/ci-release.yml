@@ -119,6 +119,50 @@ jobs:
           path: dist/mogo-tester_*_${{ matrix.goos }}_${{ matrix.goarch }}.${{ matrix.archive }}
           if-no-files-found: error
 
+  publish-prefix:
+    name: Publish prefix.dev package (${{ matrix.target-platform }})
+    runs-on: ${{ matrix.os }}
+    needs: test
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target-platform: linux-64
+          - os: macos-latest
+            target-platform: osx-arm64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build conda package
+        uses: prefix-dev/rattler-build-action@v0.2.38
+        with:
+          artifact-name: mogo-tester-conda-${{ matrix.target-platform }}
+          recipe-path: recipe/recipe-mojo-community.yaml
+          build-args: --target-platform ${{ matrix.target-platform }}
+
+      - name: Upload package to prefix.dev
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          found=0
+          while IFS= read -r pkg; do
+            found=1
+            echo "Uploading ${pkg}"
+            rattler-build upload prefix --channel tree-d "${pkg}"
+          done < <(find output -type f \( -name "*.conda" -o -name "*.tar.bz2" \))
+
+          if [[ "${found}" -eq 0 ]]; then
+            echo "No conda packages found in output"
+            exit 1
+          fi
+
   release:
     name: Release
     runs-on: ubuntu-latest

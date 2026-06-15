@@ -20,6 +20,12 @@ command that builds and runs each file independently.
 
 ## Installation
 
+Install from the `tree-d` prefix.dev channel with Pixi:
+
+```sh
+pixi global install --channel https://prefix.dev/tree-d --channel conda-forge mogo-tester
+```
+
 Build a local binary from this repository:
 
 ```sh
