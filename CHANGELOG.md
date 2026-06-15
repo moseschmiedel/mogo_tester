@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [2.3.3] - 2026-06-15
+
+### Fixed
+
+- Prevented conda package artifact directories from being uploaded as GitHub
+  Release assets.
+
 ## [2.3.2] - 2026-06-15
 
 ### Added
