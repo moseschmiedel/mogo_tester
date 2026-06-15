@@ -1,5 +1,7 @@
 # mogo_tester
 
+[![CodeQL](https://github.com/moseschmiedel/mogo_tester/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/moseschmiedel/mogo_tester/actions/workflows/github-code-scanning/codeql)
+
 `mogo-tester` discovers Mojo files from directories or direct file paths,
 compiles each one with `mojo build`, runs the produced binary, and prints
 per-file results plus a final summary. Compiled test binaries run with fake
