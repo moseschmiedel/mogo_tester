@@ -1039,7 +1039,7 @@ func TestLocateASANRuntimeReportsCompilerResourceDir(t *testing.T) {
 		"Compiler queried: " + clangPath + " --print-resource-dir",
 		"Compiler resource dir: " + resourceDir,
 		"Searched below: " + filepath.Join(resourceDir, "lib"),
-		"pixi add compiler-rt --platform osx-arm64",
+		"pixi add clang --platform osx-arm64",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("error missing %q:\n%s", want, err)

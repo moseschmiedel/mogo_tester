@@ -174,8 +174,7 @@ the same runtime:
 - macOS arm64: `DYLD_INSERT_LIBRARIES`
 - Linux x86_64: `LD_PRELOAD`
 
-`mogo-tester` queries `clang --print-resource-dir` to find the compatible
-compiler-rt runtime. If you use a non-default compiler, set `CC` to the `clang`
+`mogo-tester` queries `clang --print-resource-dir` to find the compatibl clang runtime libraries. If you use a non-default compiler, set `CC` to the `clang`
 executable to query:
 
 ```sh
@@ -185,8 +184,8 @@ CC=/path/to/clang mogo-tester --asan test
 Install the runtime with:
 
 ```sh
-pixi add compiler-rt --platform osx-arm64
-pixi add compiler-rt --platform linux-64
+pixi add clang --platform osx-arm64
+pixi add clang --platform linux-64
 ```
 
 To disable ASAN for one Mojo file, add this marker anywhere in the file:

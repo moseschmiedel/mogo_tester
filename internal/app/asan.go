@@ -35,11 +35,11 @@ func locateASANRuntimeWith(platform, clangCmd string) (asanRuntime, error) {
 	case "darwin/arm64":
 		pattern = "libclang_rt.asan_osx_dynamic.dylib"
 		preloadVar = "DYLD_INSERT_LIBRARIES"
-		hint = "Install it with: pixi add compiler-rt --platform osx-arm64"
+		hint = "Install it with: pixi add clang --platform osx-arm64"
 	case "linux/amd64":
 		pattern = "libclang_rt.asan*.so"
 		preloadVar = "LD_PRELOAD"
-		hint = "Install it with: pixi add compiler-rt --platform linux-64"
+		hint = "Install it with: pixi add clang --platform linux-64"
 	default:
 		return asanRuntime{}, fmt.Errorf("AddressSanitizer runtime lookup is not configured for %s", platform)
 	}
