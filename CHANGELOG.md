@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Added Renovate configuration for daily Pixi dependency update checks.
+
 ## [2.3.3] - 2026-06-15
 
 ### Fixed
