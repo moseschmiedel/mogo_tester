@@ -21,6 +21,7 @@ from ..report.progress import (
 )
 from ..report.results import FileResult, RunSummary
 from ..suite.artifacts import binary_path_for
+from ..suite.doctest import Doctest, remap_locations
 from ..suite.markers import read_markers
 from ..toolchain.asan import asan_reported, mark_asan_failure
 from ..toolchain.commands import compile_command, run_options
@@ -68,34 +69,71 @@ struct Reporter(Movable):
         return self.summary.copy()
 
 
+@fieldwise_init
+struct TestSource(Copyable, Movable):
+    """One program to compile and run.
+
+    `path` is the file passed to `mojo build`; `label` names it in progress
+    and result output. For a doctest, `path` is the generated program and
+    `doctest` maps its compiler diagnostics back to the documentation.
+    """
+
+    var path: Path
+    var label: Path
+    var doctest: Optional[Doctest]
+
+    @staticmethod
+    def file(path: Path) -> Self:
+        return Self(path, path, None)
+
+
+def _remap_doctest_output(mut result: ProcessResult, source: TestSource):
+    if not source.doctest:
+        return
+    ref doctest = source.doctest.value()
+    var generated = String(source.path)
+    result.stdout = remap_locations(result.stdout, generated, doctest)
+    result.stderr = remap_locations(result.stderr, generated, doctest)
+
+
 struct Job(Movable):
     """One test file moving through compile and run stages."""
 
     var result: FileResult
+    var source: TestSource
     var stage: Int
     var use_asan: Bool
 
-    def __init__(out self, var result: FileResult, stage: Int, use_asan: Bool):
+    def __init__(
+        out self,
+        var result: FileResult,
+        var source: TestSource,
+        stage: Int,
+        use_asan: Bool,
+    ):
         self.result = result^
+        self.source = source^
         self.stage = stage
         self.use_asan = use_asan
 
 
 def run_tests(
     cfg: Config,
-    paths: List[Path],
+    sources: List[TestSource],
     artifact_dir: Path,
     mut out: Output,
     mut guard: InterruptGuard,
 ) -> Tuple[RunSummary, Bool]:
-    """Compiles and runs paths with up to `cfg.parallel` concurrent jobs.
+    """Compiles and runs sources with up to `cfg.parallel` concurrent jobs.
 
     Returns the summary and whether the run was interrupted. On interrupt,
-    running children are killed and no further files are started.
+    running children are killed and no further files are started. A doctest
+    that could not be generated is reported as a compile failure without
+    invoking `mojo build`.
     """
     var start = monotonic()
     var live = (not out.capture) and isatty(1)
-    var reporter = Reporter(len(paths), Colors(not cfg.no_color), live)
+    var reporter = Reporter(len(sources), Colors(not cfg.no_color), live)
     var jobs = List[Job]()
     var children = List[Child]()
     var next = 0
@@ -107,27 +145,48 @@ def run_tests(
             for c in range(len(children)):
                 children[c].kill()
 
-        while not cancelled and len(jobs) < cfg.parallel and next < len(paths):
-            var path = paths[next]
+        while (
+            not cancelled and len(jobs) < cfg.parallel and next < len(sources)
+        ):
+            var source = sources[next].copy()
             next += 1
+            if source.doctest and source.doctest.value().error != "":
+                reporter.progress.update(source.label, STAGE_COMPILING)
+                reporter.progress.update(source.label, STAGE_DONE)
+                reporter.on_result(
+                    out,
+                    FileResult(
+                        source.label,
+                        List[String](),
+                        ProcessResult.failed(
+                            "doctest: " + source.doctest.value().error
+                        ),
+                        ProcessResult.empty(),
+                        False,
+                        Path(""),
+                    ),
+                )
+                continue
+            var path = source.path
             var markers = read_markers(path)
             var use_asan = cfg.asan and not markers.skip_asan
             var binary_path = binary_path_for(artifact_dir, path)
             var command = compile_command(
                 cfg, path, binary_path, markers, use_asan
             )
-            reporter.on_progress(out, path, STAGE_COMPILING)
+            reporter.on_progress(out, source.label, STAGE_COMPILING)
             children.append(Child(command, CommandOptions.plain()))
             jobs.append(
                 Job(
                     FileResult(
-                        path,
+                        source.label,
                         command^,
                         ProcessResult.empty(),
                         ProcessResult.empty(),
                         False,
                         binary_path,
                     ),
+                    source^,
                     STAGE_COMPILING,
                     use_asan,
                 )
@@ -145,6 +204,7 @@ def run_tests(
                 continue
             var finished = children[i].result()
             if jobs[i].stage == STAGE_COMPILING:
+                _remap_doctest_output(finished, jobs[i].source)
                 jobs[i].result.compile = finished^
                 if jobs[i].result.compile.succeeded() and not cancelled:
                     jobs[i].result.did_run = True

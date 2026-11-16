@@ -47,7 +47,7 @@ example `gcc`) must be on `PATH`.
 ## Usage
 
 ```sh
-mogo-tester [OPTION...] TEST-PATH...
+mogo-tester [OPTION...] [TEST-PATH...]
 ```
 
 Each `TEST-PATH` must be either a directory or a direct `.mojo` file. Directory
@@ -71,6 +71,7 @@ failure skips the run step for that file.
 --mojo-build-arg VALUE    extra argument passed to mojo build; repeatable
 --mojo-build-args VALUE   space-separated arguments passed to mojo build
 --precompile PATH         precompile Mojo package before building tests; repeatable
+--doctests PATH           run doctests from .mojo and .md files under PATH; repeatable
 --keep-artifacts          keep compiled binaries and print the artifact directory
 --no-color                disable colored output
 --asan                    build and run tests with AddressSanitizer enabled
@@ -79,7 +80,8 @@ failure skips the run step for that file.
 ```
 
 Options may appear before or after `TEST-PATH` operands. Use `--` if a test path
-itself starts with a dash.
+itself starts with a dash. `TEST-PATH` operands are optional when `--doctests`
+is given.
 
 ### Examples
 
@@ -116,6 +118,12 @@ Precompile a shared Mojo package before compiling tests that import it:
 
 ```sh
 mogo-tester --precompile src/shared --mojo-build-args "-I src" test
+```
+
+Run the doctests in a package's docstrings and guide pages next to the tests:
+
+```sh
+mogo-tester --mojo-build-args "-I src" --doctests src/mypkg --doctests docs test
 ```
 
 Disable ANSI color codes for logs or CI output:
@@ -166,6 +174,39 @@ adds that directory to each later `mojo build` with `-I`.
 
 Duplicate precompile package basenames are rejected because the `.mojoc`
 filename defines the package name used by Mojo imports.
+
+## Doctests
+
+`--doctests PATH` collects Mojo code blocks from Markdown files and from
+docstrings in `.mojo` files. A directory is searched recursively, skipping
+entries whose name starts with `.`. A block takes part when its fence carries
+a `doctest` attribute, using the same syntax as
+[Modo](https://mlange-42.github.io/modo/):
+
+````markdown
+```mojo {doctest="greet" global=true hide=true}
+from std.testing import assert_equal
+```
+
+```mojo {doctest="greet"}
+assert_equal("hi".upper(), "HI")
+```
+````
+
+Blocks with the same `doctest` name in one Markdown file, or in one docstring,
+form a single program:
+
+- Blocks marked `global=true` are placed at file scope, in source order.
+- All other blocks become the body of a generated `def main() raises:`.
+- If the global blocks define `def main` themselves and no other blocks
+  exist, the program is used unchanged. Combining such a `main` with
+  non-global blocks is reported as a failure.
+- `hide` only affects rendered documentation and is ignored.
+
+Each doctest is compiled and run like a test file and reported as
+`SOURCE:LINE#NAME`. Compiler diagnostics refer to lines in the documentation
+source rather than the generated program. A directory that contains no
+doctests is an error.
 
 ## AddressSanitizer
 

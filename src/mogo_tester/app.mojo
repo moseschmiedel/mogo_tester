@@ -1,6 +1,7 @@
 """Top-level application flow and logging."""
 
 from std.logger import Level, Logger
+from std.os import makedirs
 from std.pathlib import Path
 from std.sys import stderr
 
@@ -9,8 +10,11 @@ from .fs.paths import make_temp_dir, remove_all
 from .posix.signals import InterruptGuard
 from .report.output import Output
 from .runner.precompile import precompile_modules
-from .runner.scheduler import run_tests
+from .runner.scheduler import TestSource, run_tests
+from .suite.artifacts import sanitize_binary_name
 from .suite.discovery import discover_tests
+from .suite.doctest import discover_doctest_files, scan_doctests
+from .fs.sha256 import hex_encode, sha256
 from .toolchain.asan import locate_asan_runtime
 
 
@@ -60,7 +64,12 @@ def run(args: List[String], version: String, mut out: Output) raises:
 
     var guard = InterruptGuard()
 
-    var paths = discover_tests(cfg.test_paths)
+    var paths = List[Path]()
+    if len(cfg.test_paths) > 0:
+        paths = discover_tests(cfg.test_paths)
+    var doctest_files = List[Path]()
+    if len(cfg.doctest_paths) > 0:
+        doctest_files = discover_doctest_files(cfg.doctest_paths)
 
     var artifact_dir: Path
     try:
@@ -69,7 +78,17 @@ def run(args: List[String], version: String, mut out: Output) raises:
         raise Error("create artifact directory: ", e)
 
     try:
-        _run_in(cfg, paths, artifact_dir, out, guard)
+        var sources = List[TestSource]()
+        for path in paths:
+            sources.append(TestSource.file(path))
+        if len(doctest_files) > 0:
+            generate_doctests(doctest_files, artifact_dir, sources)
+            if len(sources) == len(paths):
+                var operands = List[String]()
+                for doctest_path in cfg.doctest_paths:
+                    operands.append(String(doctest_path))
+                raise Error("no doctests found in ", ", ".join(operands))
+        _run_in(cfg, sources, artifact_dir, out, guard)
     finally:
         if not cfg.keep_artifacts:
             try:
@@ -80,9 +99,43 @@ def run(args: List[String], version: String, mut out: Output) raises:
                 )
 
 
+def generate_doctests(
+    files: List[Path], artifact_dir: Path, mut sources: List[TestSource]
+) raises:
+    """Writes one program per doctest in files below artifact_dir and
+    appends it to sources.
+
+    Doctests that could not be generated are appended without writing a
+    file, so the runner reports them as failures.
+
+    Raises:
+        Error: If a file cannot be read or a program cannot be written.
+    """
+    var dir = artifact_dir / "doctests"
+    makedirs(dir, exist_ok=True)
+    for file in files:
+        var text: String
+        try:
+            text = file.read_text()
+        except e:
+            raise Error("read doctests in ", file, ": ", e)
+        for doctest in scan_doctests(String(file), text):
+            var label = doctest.label()
+            var digest = hex_encode(sha256(label.as_bytes()))
+            var path = dir / (
+                sanitize_binary_name(file.name() + "_" + doctest.name)
+                + "-"
+                + String(digest[byte=0:10])
+                + ".mojo"
+            )
+            if doctest.error == "":
+                path.write_text(doctest.code)
+            sources.append(TestSource(path, Path(label), doctest.copy()))
+
+
 def _run_in(
     mut cfg: Config,
-    paths: List[Path],
+    sources: List[TestSource],
     artifact_dir: Path,
     mut out: Output,
     mut guard: InterruptGuard,
@@ -97,14 +150,18 @@ def _run_in(
     var operands = List[String]()
     for test_path in cfg.test_paths:
         operands.append(String(test_path))
+    var doctest_operands = List[String]()
+    for doctest_path in cfg.doctest_paths:
+        doctest_operands.append(String(doctest_path))
     logger().info(
         "running mojo tests",
         String("paths=[", " ".join(operands), "]"),
-        String("count=", len(paths)),
+        String("doctests=[", " ".join(doctest_operands), "]"),
+        String("count=", len(sources)),
         String("parallel=", cfg.parallel),
     )
 
-    var outcome = run_tests(cfg, paths, artifact_dir, out, guard)
+    var outcome = run_tests(cfg, sources, artifact_dir, out, guard)
     var summary = outcome[0].copy()
 
     if cfg.keep_artifacts:

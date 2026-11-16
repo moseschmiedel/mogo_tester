@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `--doctests PATH` runs Modo-style doctests (`{doctest="name"}` code blocks)
+  from Markdown files and `.mojo` docstrings. Non-global blocks run inside a
+  generated `def main() raises:`, and compiler errors point at the
+  documentation source.
+
 ### Changed
 
 - **Breaking:** Rewrote `mogo-tester` in Mojo 1.2. The CLI options, report
