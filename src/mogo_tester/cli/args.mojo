@@ -15,6 +15,7 @@ struct Config(Copyable, Movable):
     var mojo_build_args: List[String]
     var precompile_paths: List[Path]
     var keep_artifacts: Bool
+    var recursive: Bool
     var no_color: Bool
     var show_version: Bool
     var show_help: Bool
@@ -29,6 +30,7 @@ struct Config(Copyable, Movable):
         self.mojo_build_args = List[String]()
         self.precompile_paths = List[Path]()
         self.keep_artifacts = False
+        self.recursive = False
         self.no_color = False
         self.show_version = False
         self.show_help = False
@@ -46,6 +48,7 @@ comptime VALUE_OPTIONS: List[String] = [
 ]
 comptime BOOL_OPTIONS: List[String] = [
     "keep-artifacts",
+    "recursive",
     "no-color",
     "asan",
     "version",
@@ -185,6 +188,8 @@ def parse_args(args: List[String], out cfg: Config) raises UsageError:
                 enabled = _parse_bool(name, _inline_value(arg))
             if name == "keep-artifacts":
                 cfg.keep_artifacts = enabled
+            elif name == "recursive":
+                cfg.recursive = enabled
             elif name == "no-color":
                 cfg.no_color = enabled
             elif name == "asan":
@@ -243,6 +248,7 @@ def usage(default_parallel: Int) -> String:
             "  --keep-artifacts          keep compiled binaries and print the"
             " artifact directory\n"
         ),
+        "  --recursive               search directory operands recursively\n",
         "  --no-color                disable colored output\n",
         (
             "  --asan                    build and run tests with"

@@ -80,12 +80,14 @@ def test_allows_options_after_test_paths() raises:
             "smoke/a.mojo",
             "--no-color",
             "-keep-artifacts",
+            "--recursive",
         ]
     )
     assert_equal(cfg.test_paths, ["test", "smoke/a.mojo"])
     assert_equal(cfg.parallel, 3)
     assert_true(cfg.no_color)
     assert_true(cfg.keep_artifacts)
+    assert_true(cfg.recursive)
 
 
 def test_honors_end_of_options() raises:

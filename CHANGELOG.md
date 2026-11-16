@@ -10,6 +10,10 @@ All notable changes to this project will be documented in this file.
   from Markdown files and `.mojo` docstrings. Non-global blocks run inside a
   generated `def main() raises:`, and compiler errors point at the
   documentation source.
+- `--recursive` discovers `.mojo` files in all subdirectories of directory
+  operands, sorted by path.
+- A warning is logged for each directory operand that contributes no test
+  files, even when other operands found tests.
 
 ### Changed
 

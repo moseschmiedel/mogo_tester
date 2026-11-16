@@ -345,6 +345,30 @@ def test_runs_with_low_descriptor_limit() raises:
     _ = box^  # Keep the sandbox alive until the child has finished.
 
 
+def test_recursive_discovery_and_empty_dir_warning() raises:
+    var box = Sandbox()
+    makedirs(box.root + "/t/nested/deep")
+    makedirs(box.root + "/smoke")
+    box.add_test("nested/deep/a.mojo", "# RUN: true\n")
+    write_file(box.root + "/smoke/b.mojo", "# RUN: true\n")
+    var plain = box.run(["--no-color", box.root + "/t", box.root + "/smoke"])
+    assert_equal(plain.exit_code, 0)
+    assert_true("Summary: total=1 " in plain.stdout)
+    assert_true(
+        String(
+            "WARNING::: no .mojo files found in ",
+            box.root,
+            "/t (use --recursive to search subdirectories)",
+        )
+        in plain.stderr
+    )
+    var deep = box.run(["--no-color", "--recursive", box.root + "/t"])
+    assert_equal(deep.exit_code, 0)
+    assert_true("Summary: total=1 passed=1 " in deep.stdout)
+    assert_true("/t/nested/deep/a.mojo ===" in deep.stdout)
+    assert_false("WARNING" in deep.stderr)
+
+
 def test_version_and_help() raises:
     var box = Sandbox()
     var version = box.run(["--version"])
