@@ -135,13 +135,14 @@ def test_summary_counts() raises:
     summary.failed_compile = 1
     summary.failed_run = 1
     summary.elapsed_ns = 1_230_000_000
+    summary.skipped = 2
     var out = Output(capture=True)
     print_summary(out, summary, Colors(False))
     assert_equal(
         out.buffer,
         (
             "Summary: total=3 passed=1 failed_compile=1 failed_run=1"
-            " elapsed=1.23s\n"
+            " elapsed=1.23s skipped=2\n"
         ),
     )
     assert_true(summary.failed())

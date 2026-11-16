@@ -23,6 +23,11 @@ from mogo_tester.suite.doctest import (
     remap_locations,
     scan_doctests,
 )
+from mogo_tester.suite.exclude import (
+    apply_excludes,
+    exclude_matches,
+    glob_match,
+)
 from mogo_tester.suite.markers import SourceMarkers, read_markers
 
 
@@ -142,6 +147,57 @@ def test_discover_tests_reports_empty_dirs() raises:
         "no .mojo files found in docs/test",
     )
     remove_all(dir)
+
+
+def test_glob_match_elements() raises:
+    assert_true(glob_match("a.mojo", "a.mojo"))
+    assert_false(glob_match("a.mojo", "b.mojo"))
+    assert_true(glob_match("*_test.mojo", "x_test.mojo"))
+    assert_true(glob_match("*_test.mojo", "_test.mojo"))
+    assert_false(glob_match("*.mojo", "d/a.mojo"))
+    assert_true(glob_match("a?c", "abc"))
+    assert_false(glob_match("a?c", "ac"))
+    assert_true(glob_match("[ab]*", "bx"))
+    assert_false(glob_match("[!ab]*", "bx"))
+    assert_true(glob_match("x[0-9]", "x7"))
+    assert_false(glob_match("x[0-9]", "xa"))
+    assert_true(glob_match("x[", "x["))
+    assert_true(glob_match("\\*", "*"))
+    assert_false(glob_match("\\*", "a"))
+    assert_true(glob_match("a*b*c", "aXbYbZc"))
+
+
+def test_glob_match_double_star() raises:
+    assert_true(glob_match("**/a.mojo", "a.mojo"))
+    assert_true(glob_match("**/a.mojo", "x/y/a.mojo"))
+    assert_true(glob_match("docs/**/a.mojo", "docs/a.mojo"))
+    assert_true(glob_match("docs/**/a.mojo", "docs/t/g/a.mojo"))
+    assert_false(glob_match("docs/**/a.mojo", "src/t/a.mojo"))
+    assert_true(glob_match("docs/**", "docs/t/a.mojo"))
+    assert_true(glob_match("**/**/h_*.mojo", "/abs/h_x.mojo"))
+    assert_false(glob_match("docs/*", "docs/t/a.mojo"))
+
+
+def test_exclude_matches_path_or_basename() raises:
+    assert_true(exclude_matches("a_test.mojo", Path("docs/t/a_test.mojo")))
+    assert_true(exclude_matches("docs/t/*.mojo", Path("./docs//t/a.mojo")))
+    assert_true(exclude_matches("./docs/t/a.mojo", Path("docs/t/a.mojo")))
+    assert_false(exclude_matches("t/a.mojo", Path("docs/t/a.mojo")))
+
+
+def test_apply_excludes() raises:
+    var paths: List[Path] = [
+        Path("t/a.mojo"),
+        Path("t/b.mojo"),
+        Path("t/c.mojo"),
+    ]
+    var result = apply_excludes(paths, ["b.mojo", "t/[ab].mojo", "zz.mojo"])
+    assert_equal(result.kept, [Path("t/c.mojo")])
+    assert_equal(result.skipped, [Path("t/a.mojo"), Path("t/b.mojo")])
+    assert_equal(result.unmatched, ["zz.mojo"])
+    var none = apply_excludes(paths, [])
+    assert_equal(len(none.kept), 3)
+    assert_equal(len(none.skipped), 0)
 
 
 def markers_for(content: String) raises -> SourceMarkers:

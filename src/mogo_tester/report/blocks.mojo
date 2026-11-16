@@ -33,6 +33,11 @@ def print_result_block(mut out: Output, result: FileResult, colors: Colors):
     out.write(colors.label("result:") + " " + status + "\n\n")
 
 
+def print_skipped(mut out: Output, path: Path, colors: Colors):
+    """Writes the line for a file excluded from the run."""
+    out.write(String(colors.skip("SKIP"), " ", path, "\n"))
+
+
 def print_precompile_block(
     mut out: Output,
     path: Path,
@@ -104,6 +109,8 @@ def print_summary(mut out: Output, summary: RunSummary, colors: Colors):
             summary.failed_run,
             " elapsed=",
             format_duration(summary.elapsed_ns),
+            " skipped=",
+            summary.skipped,
             "\n",
         )
     )

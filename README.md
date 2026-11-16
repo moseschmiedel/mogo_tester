@@ -75,6 +75,7 @@ failure skips the run step for that file.
 --mojo-build-args VALUE   space-separated arguments passed to mojo build
 --precompile PATH         precompile Mojo package before building tests; repeatable
 --doctests PATH           run doctests from .mojo and .md files under PATH; repeatable
+--exclude GLOB            skip test files matching GLOB; repeatable
 --keep-artifacts          keep compiled binaries and print the artifact directory
 --recursive               search directory operands recursively
 --no-color                disable colored output
@@ -136,6 +137,15 @@ Run the doctests in a package's docstrings and guide pages next to the tests:
 mogo-tester --mojo-build-args "-I src" --doctests src/mypkg --doctests docs test
 ```
 
+Skip known-failing files without deleting them:
+
+```sh
+mogo-tester --recursive \
+  --exclude readme_test.mojo \
+  --exclude 'docs/test/**/host_storage_*_test.mojo' \
+  docs/test
+```
+
 Disable ANSI color codes for logs or CI output:
 
 ```sh
@@ -159,8 +169,11 @@ Each file gets a result block containing:
 The final line is a machine-readable summary:
 
 ```text
-Summary: total=3 passed=2 failed_compile=1 failed_run=0 elapsed=1.23s
+Summary: total=3 passed=2 failed_compile=1 failed_run=0 elapsed=1.23s skipped=0
 ```
+
+`skipped` counts files excluded with `--exclude`; they are not included in
+`total`.
 
 The process exits with status `0` only when all discovered files compile and
 run successfully. Compile failures and run failures both produce a non-zero
@@ -278,6 +291,25 @@ reported with a warning such as:
 
 ```text
 WARNING::: no .mojo files found in docs/test (use --recursive to search subdirectories)
+```
+
+### Excluding Files
+
+`--exclude GLOB` removes discovered test files from the run. It does not apply
+to doctests selected with `--doctests`. Each excluded file is
+printed as `SKIP PATH` before the result blocks, is neither compiled nor run,
+and does not affect the exit status.
+
+A pattern matches if it matches either the discovered path, after redundant
+`./` and `//` are removed, or the file's basename. Patterns are matched against
+paths as discovered, so use relative patterns with relative operands. Within a
+path element, `*` matches any characters, `?` matches one character, and
+`[...]` matches a character class (`[a-z]`, `[!a-z]`). A `**` element matches
+zero or more directories. If a pattern matches no file, `mogo-tester` logs a
+warning, which helps spot stale skip lists:
+
+```text
+WARNING::: --exclude pattern gone_test.mojo matched no test files
 ```
 
 ### Mojo Build Arguments

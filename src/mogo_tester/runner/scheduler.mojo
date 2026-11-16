@@ -9,7 +9,11 @@ from ..posix.signals import InterruptGuard
 from ..process.child import Child
 from ..process.result import CommandOptions, ProcessResult
 from ..process.run import poll_children
-from ..report.blocks import print_result_block, print_summary
+from ..report.blocks import (
+    print_result_block,
+    print_skipped,
+    print_summary,
+)
 from ..report.output import Colors, Output
 from ..report.progress import (
     ProgressTracker,
@@ -120,11 +124,15 @@ struct Job(Movable):
 def run_tests(
     cfg: Config,
     sources: List[TestSource],
+    skipped: List[Path],
     artifact_dir: Path,
     mut out: Output,
     mut guard: InterruptGuard,
 ) -> Tuple[RunSummary, Bool]:
     """Compiles and runs sources with up to `cfg.parallel` concurrent jobs.
+
+    Skipped paths are reported as `SKIP` lines first and counted in the
+    summary, but not compiled or run.
 
     Returns the summary and whether the run was interrupted. On interrupt,
     running children are killed and no further files are started. A doctest
@@ -133,7 +141,11 @@ def run_tests(
     """
     var start = monotonic()
     var live = (not out.capture) and isatty(1)
-    var reporter = Reporter(len(sources), Colors(not cfg.no_color), live)
+    var colors = Colors(not cfg.no_color)
+    var reporter = Reporter(len(sources), colors, live)
+    for path in skipped:
+        print_skipped(out, path, colors)
+    reporter.summary.skipped = len(skipped)
     var jobs = List[Job]()
     var children = List[Child]()
     var next = 0
