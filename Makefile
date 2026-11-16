@@ -1,15 +1,28 @@
-.PHONY: build run test tidy
+.PHONY: build run test format clean
 
-GOCACHE ?= $(CURDIR)/.gocache
+PIXI ?= pixi
+MOJO ?= $(PIXI) run mojo
+
+VERSION ?= dev
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+
+MOJO_DEFINES = -D MOGO_VERSION=$(VERSION) -D MOGO_COMMIT=$(COMMIT) -D MOGO_DATE=$(DATE)
 
 build:
-	GOCACHE=$(GOCACHE) go build -o bin/mogo-tester ./cmd/mogo-tester
+	mkdir -p bin
+	$(MOJO) build -I src $(MOJO_DEFINES) -o bin/mogo-tester src/main.mojo
 
-run:
-	GOCACHE=$(GOCACHE) go run ./cmd/mogo-tester
+run: build
+	./bin/mogo-tester $(ARGS)
 
-test:
-	GOCACHE=$(GOCACHE) go test ./...
+# The test suite is run by the freshly built binary itself.
+test: build
+	MOGO_TESTER_BIN=$(CURDIR)/bin/mogo-tester $(PIXI) run ./bin/mogo-tester \
+		--mojo-build-arg -I --mojo-build-arg $(CURDIR)/src tests
 
-tidy:
-	GOCACHE=$(GOCACHE) go mod tidy
+format:
+	$(MOJO) format src tests
+
+clean:
+	rm -rf bin

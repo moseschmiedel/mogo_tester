@@ -14,21 +14,30 @@ build:
   skip:
     - win
   script:
-    - go-licenses save ./cmd/mogo-tester --save_path="./license-files"
+    # Link through the conda C compiler (absolute path); mojo otherwise looks
+    # for `cc` on PATH.
+    - export MODULAR_MOJO_MAX_LINKER_DRIVER="$(command -v "${CC:-cc}")"
+    - mkdir -p "$PREFIX/bin"
     - >
-      go build
-      -v
-      -trimpath
-      -ldflags "-s -w -X main.version=${{ version }}"
+      "$PREFIX/bin/mojo" build
+      -I src
+      -D MOGO_VERSION=v${{ version }}
       -o "$PREFIX/bin/mogo-tester"
-      ./cmd/mogo-tester
+      src/main.mojo
 
 requirements:
   build:
-    - ${{ compiler('go-nocgo') }}
-    - go-licenses
+    - ${{ compiler('c') }}
+  host:
+    # The compiler runs from the host prefix so the binary's rpath points at
+    # the Mojo runtime (libKGENCompilerRTShared) that run requirements provide.
+    - mojo-compiler ==1.2.0
+    # libKGENCompilerRTShared needs libstdc++ at link time on Linux.
+    - if: linux
+      then: libstdcxx
   run:
-    - mojo
+    - mojo >=1.2.0,<1.3
+    - mojo-compiler >=1.2.0,<1.3
 
 tests:
   - script:
@@ -48,8 +57,6 @@ about:
   license: MIT
   license_file:
     - LICENSE
-    - license-files/
-  documentation: https://pkg.go.dev/github.com/moseschmiedel/mogo_tester/v2
   repository: https://github.com/moseschmiedel/mogo_tester
 
 extra:

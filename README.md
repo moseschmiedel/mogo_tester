@@ -14,31 +14,37 @@ command that builds and runs each file independently.
 
 ## Requirements
 
-- Go 1.26.3 or newer
+- macOS on Apple silicon or Linux (x86_64 or aarch64)
 - Mojo on `PATH`
 - `clang` on `PATH` when using `--asan`
+
+`mogo-tester` is written in Mojo 1.2. Mojo binaries link the Mojo runtime
+library dynamically, so the tool is distributed as a conda package that
+depends on `mojo-compiler`, not as a standalone binary.
 
 ## Installation
 
 Install from the `tree-d` prefix.dev channel with Pixi:
 
 ```sh
-pixi global install --channel https://prefix.dev/tree-d --channel conda-forge mogo-tester
+pixi global install \
+  --channel https://prefix.dev/tree-d \
+  --channel https://conda.modular.com/max \
+  --channel conda-forge \
+  mogo-tester
 ```
 
-Build a local binary from this repository:
+Build a local binary from this repository with [Pixi](https://pixi.sh):
 
 ```sh
 make build
 ```
 
-The binary is written to `bin/mogo-tester`.
+The binary is written to `bin/mogo-tester`. It loads the Mojo runtime from the
+repository's `.pixi` environment.
 
-For ad hoc usage without installing the binary:
-
-```sh
-go run ./cmd/mogo-tester --help
-```
+On Linux, `mojo build` links through the system C compiler, so `cc` (for
+example `gcc`) must be on `PATH`.
 
 ## Usage
 
@@ -144,6 +150,10 @@ The process exits with status `0` only when all discovered files compile and
 run successfully. Compile failures and run failures both produce a non-zero
 exit status.
 
+Pressing Ctrl-C kills the running compile and test processes, including any
+processes they started, prints the summary for the files that finished,
+removes the artifact directory, and exits with status `1`.
+
 ## Module Precompilation
 
 Use `--precompile PATH` to run `mojo precompile` for one or more Mojo packages
@@ -174,7 +184,7 @@ the same runtime:
 - macOS arm64: `DYLD_INSERT_LIBRARIES`
 - Linux x86_64: `LD_PRELOAD`
 
-`mogo-tester` queries `clang --print-resource-dir` to find the compatibl clang runtime libraries. If you use a non-default compiler, set `CC` to the `clang`
+`mogo-tester` queries `clang --print-resource-dir` to find the compatible clang runtime libraries. If you use a non-default compiler, set `CC` to the `clang`
 executable to query:
 
 ```sh
@@ -236,37 +246,36 @@ toolchain-managed compiler, set `CC` to that compiler before running
 
 ## Development
 
-Run the Go test suite:
+Run the test suite. `make test` builds `bin/mogo-tester` and uses it to run
+the Mojo test files in `tests/`:
 
 ```sh
 make test
 ```
 
-Format or tidy changes with standard Go tooling:
+Format Mojo sources:
 
 ```sh
-gofmt -w ./cmd ./internal
-make tidy
+make format
 ```
 
-For release builds, inject explicit version metadata:
+Release builds inject version metadata with Mojo defines:
 
 ```sh
-go build \
-  -ldflags "-X main.version=v1.2.3 -X main.commit=$(git rev-parse --short HEAD) -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  -o bin/mogo-tester \
-  ./cmd/mogo-tester
+make build VERSION=v1.2.3
 ```
 
-If metadata is not injected, `mogo-tester --version` falls back to Go build
-metadata from `debug.ReadBuildInfo()` when available.
+`make build` sets `MOGO_COMMIT` from `git rev-parse --short HEAD` and
+`MOGO_DATE` from the current UTC time. Without `VERSION`, `--version` reports
+`dev`.
 
 ## Release
 
-Pushing a version tag runs the release workflow, builds Linux, macOS, and
-Windows archives, and attaches them to a GitHub Release:
+Pushing a version tag runs the release workflow. It builds and uploads the
+conda packages for `linux-64` and `osx-arm64` to the `tree-d` prefix.dev
+channel, then creates a GitHub Release without attached binaries:
 
 ```sh
-git tag v2.0.0
-git push origin v2.0.0
+git tag v3.0.0
+git push origin v3.0.0
 ```

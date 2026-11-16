@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Rewrote `mogo-tester` in Mojo 1.2. The CLI options, report
+  format, and exit status are unchanged. The tool now requires macOS on Apple
+  silicon or Linux; Windows and Intel macOS are no longer supported.
+- **Breaking:** Releases are distributed only as conda packages on the
+  `tree-d` prefix.dev channel, which now depend on `mojo-compiler` from
+  `https://conda.modular.com/max`. GitHub Releases no longer attach binary
+  archives.
+- Ctrl-C now also kills processes started by compile and test processes.
+- Version metadata is injected with `-D MOGO_VERSION=...`,
+  `-D MOGO_COMMIT=...`, and `-D MOGO_DATE=...` instead of Go linker flags.
+
 ## [2.3.3] - 2026-06-15
 
 ### Fixed

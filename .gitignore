@@ -1,13 +1,10 @@
 # Binaries and test artifacts
 /bin/
 /dist/
-*.test
-*.out
-coverage.out
-.gocache/
 output/
 
 # Local environment
+.pixi/
 .env
 .env.*
 
