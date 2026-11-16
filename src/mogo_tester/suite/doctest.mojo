@@ -188,16 +188,18 @@ def scan_doctests(source: String, text: String, out doctests: List[Doctest]):
     var groups = List[Group]()
     var keys = Dict[String, Int]()
     var scope = 0
+    var docstring_delimiter = String()
     var lines = text.split("\n")
     var i = 0
     var count = len(lines)
     while i < count:
         var line = String(lines[i])
         var stripped = String(line.lstrip())
-        var fence_size = _backtick_run(stripped)
+        var fence_char = _fence_char(stripped)
+        var fence_size = _char_run(stripped, fence_char)
         if fence_size < MIN_FENCE:
             if track_docstrings:
-                scope += line.count('"""')
+                scope += _docstring_toggles(line, docstring_delimiter)
             i += 1
             continue
 
@@ -224,7 +226,7 @@ def scan_doctests(source: String, text: String, out doctests: List[Doctest]):
         while i < count:
             var content = String(lines[i])
             var trimmed = String(content.strip())
-            var run = _backtick_run(trimmed)
+            var run = _char_run(trimmed, fence_char)
             if run >= fence_size and run == trimmed.byte_length():
                 closed = True
                 break
@@ -263,12 +265,59 @@ def scan_doctests(source: String, text: String, out doctests: List[Doctest]):
         doctests.append(_generate(source, group))
 
 
-def _backtick_run(text: String) -> Int:
-    """Returns the number of leading backticks in text."""
+def _fence_char(text: String) -> String:
+    """Returns the fence character text starts with, or an empty string."""
+    if text.startswith("`"):
+        return "`"
+    if text.startswith("~"):
+        return "~"
+    return ""
+
+
+def _char_run(text: String, char: String) -> Int:
+    """Returns how often char repeats at the start of text."""
+    if char == "":
+        return 0
     var n = 0
-    while n < text.byte_length() and String(text[byte=n]) == "`":
+    while n < text.byte_length() and String(text[byte=n]) == char:
         n += 1
     return n
+
+
+def _docstring_toggles(line: String, mut delimiter: String) -> Int:
+    """Returns how many docstrings open or close on line.
+
+    `delimiter` holds the triple quote of the open docstring, or is empty
+    outside one. Inside a docstring only its own delimiter closes it, so
+    triple single quotes within a triple double-quoted docstring do not
+    change the scope, and vice versa.
+    """
+    var toggles = 0
+    var pos = 0
+    while True:
+        var at: Int
+        if delimiter != "":
+            at = line.find(delimiter, pos)
+        else:
+            var double = line.find('"""', pos)
+            var single = line.find("'''", pos)
+            if double < 0 or (single >= 0 and single < double):
+                at = single
+                delimiter = "'''"
+            else:
+                at = double
+                delimiter = '"""'
+            if at < 0:
+                delimiter = ""
+                return toggles
+            toggles += 1
+            pos = at + 3
+            continue
+        if at < 0:
+            return toggles
+        delimiter = ""
+        toggles += 1
+        pos = at + 3
 
 
 def _dedent(line: String, indent: String) -> String:

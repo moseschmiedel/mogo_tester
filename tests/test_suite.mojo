@@ -304,6 +304,47 @@ def test_other_fences_are_ignored() raises:
     assert_equal(len(scan_doctests("a.md", text)), 0)
 
 
+def test_tilde_fences_hide_nested_blocks() raises:
+    var text = String(
+        "~~~markdown\n"
+        '```mojo {doctest="example"}\n'
+        "print(1)\n"
+        "```\n"
+        "~~~\n"
+        '~~~mojo {doctest="tilde"}\n'
+        "print(2)\n"
+        "```\n"
+        "~~~\n"
+    )
+    var tests = scan_doctests("a.md", text)
+    assert_equal(len(tests), 1)
+    assert_equal(tests[0].name, "tilde")
+    assert_equal(tests[0].code, "def main() raises:\n    print(2)\n    ```\n")
+
+
+def test_single_quoted_docstrings_scope_names() raises:
+    var text = String(
+        "def f():\n"
+        "    '''Doc with \"\"\" inside.\n"
+        '    ```mojo {doctest="ex"}\n'
+        "    print(1)\n"
+        "    ```\n"
+        "    '''\n"
+        "    pass\n"
+        "def g():\n"
+        "    '''Doc.\n"
+        '    ```mojo {doctest="ex"}\n'
+        "    print(2)\n"
+        "    ```\n"
+        "    '''\n"
+        "    pass\n"
+    )
+    var tests = scan_doctests("a.mojo", text)
+    assert_equal(len(tests), 2)
+    assert_equal(tests[0].code, "def main() raises:\n    print(1)\n")
+    assert_equal(tests[1].code, "def main() raises:\n    print(2)\n")
+
+
 def test_longer_fences_hide_nested_blocks() raises:
     var text = String(
         "````markdown\n"
