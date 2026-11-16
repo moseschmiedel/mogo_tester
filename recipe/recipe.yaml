@@ -12,13 +12,31 @@ build:
   number: 0
   skip:
     - win
+  script:
+    # Link through the conda C compiler (absolute path); mojo otherwise looks
+    # for `cc` on PATH.
+    - export MODULAR_MOJO_MAX_LINKER_DRIVER="$(command -v "${CC:-cc}")"
+    - mkdir -p "$PREFIX/bin"
+    - >
+      "$PREFIX/bin/mojo" build
+      -I src
+      -D MOGO_VERSION=v${{ version }}
+      -o "$PREFIX/bin/mogo-tester"
+      src/main.mojo
 
 requirements:
   build:
-    - ${{ compiler('go-nocgo') }}
-    - go-licenses
+    - ${{ compiler('c') }}
+  host:
+    # The compiler runs from the host prefix so the binary's rpath points at
+    # the Mojo runtime (libKGENCompilerRTShared) that run requirements provide.
+    - mojo-compiler ==1.2.0
+    # libKGENCompilerRTShared needs libstdc++ at link time on Linux.
+    - if: linux
+      then: libstdcxx
   run:
-    - mojo
+    - mojo >=1.2.0,<1.3
+    - mojo-compiler >=1.2.0,<1.3
 
 tests:
   - script:
@@ -36,7 +54,6 @@ about:
   license: MIT
   license_file:
     - LICENSE
-    - license-files/
 
 extra:
   recipe-maintainers:
