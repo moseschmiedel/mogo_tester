@@ -179,6 +179,10 @@ def test_doctests_combine_with_tests_and_require_doctests() raises:
     var box = Sandbox()
     makedirs(box.root + "/docs")
     box.add_test("a.mojo", "# RUN: true\n")
+    var empty_dir = box.run(["--doctests", box.root + "/docs"])
+    assert_equal(empty_dir.exit_code, 1)
+    assert_true("no doctests found in " in empty_dir.stderr)
+
     write_file(box.root + "/docs/empty.md", "No doctests here.\n")
     var none = box.run(["--doctests", box.root + "/docs", box.root + "/t"])
     assert_equal(none.exit_code, 1)

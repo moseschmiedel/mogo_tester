@@ -81,7 +81,7 @@ def run(args: List[String], version: String, mut out: Output) raises:
         var sources = List[TestSource]()
         for path in paths:
             sources.append(TestSource.file(path))
-        if len(doctest_files) > 0:
+        if len(cfg.doctest_paths) > 0:
             generate_doctests(doctest_files, artifact_dir, sources)
             if len(sources) == len(paths):
                 var operands = List[String]()
