@@ -4,8 +4,8 @@ Guidance for agents working in this repository.
 
 ## Project
 
-`mogo-tester` is a Mojo 1.2 CLI that discovers top-level `.mojo` files in a
-directory, compiles each with `mojo build`, runs the produced binary, and
+`mogo-tester` is a Mojo 1.2 CLI that discovers `.mojo` files in directories,
+compiles each with `mojo build`, runs the produced binary, and
 reports per-file results plus an aggregate summary. The CLI entry point is
 `src/main.mojo`; runtime behavior lives in the `src/mogo_tester` package. The
 Mojo toolchain is managed by Pixi (`pixi.toml`).
@@ -19,7 +19,7 @@ packages listed above it:
 | `process` | Running child processes: `result` (`ProcessResult`, `CommandOptions`), `child` (`Child`), `run` (`poll_children`, `run_command`) |
 | `fs` | `paths` (`clean`, temp dirs, `remove_all`) and `sha256` |
 | `toolchain` | `platform` (`Platform`), `asan` (runtime lookup), `commands` (`mojo build` argv) |
-| `suite` | `discovery`, `markers`, `artifacts` (binary and `.mojoc` names) |
+| `suite` | `discovery`, `exclude` (`--exclude` glob matching), `doctest` (Modo doctest extraction), `markers`, `artifacts` (binary and `.mojoc` names) |
 | `cli` | `args` (`Config`, `parse_args`, `usage`) |
 | `report` | `output`, `format`, `results`, `progress`, `blocks` |
 | `runner` | `precompile` and the compile/run `scheduler` |
@@ -83,14 +83,11 @@ gh release view TAG --repo moseschmiedel/mogo_tester
 
 ## Implementation Notes
 
-- Test discovery is intentionally top-level only; nested `.mojo` files are not
-  searched.
 - `--doctests` searches recursively (skipping dot-entries) and generates one
   program per Modo-style doctest under `<artifact-dir>/doctests`; see
   `src/mogo_tester/suite/doctest.mojo`.
-- Test paths are sorted before execution.
 - `--mojo-build-arg` is repeatable and preserves exact tokens.
-- `--mojo-build-args` is split with `strings.Fields`.
+- `--mojo-build-args` is split on whitespace (`String.split()`).
 - Compiled artifacts use sanitized basenames plus a path hash to avoid
   collisions.
 - `posix/libc.mojo` holds only direct, `@inline(.always)` translations of
