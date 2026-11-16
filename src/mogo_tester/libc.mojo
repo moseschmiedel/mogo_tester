@@ -38,6 +38,7 @@ comptime SIGINT: c_int = 2
 comptime SIGKILL: c_int = 9
 
 comptime POSIX_SPAWN_SETPGROUP: c_short = 0x02
+comptime POSIX_SPAWN_SETSIGDEF: c_short = 0x04
 comptime POSIX_SPAWN_SETSIGMASK: c_short = 0x08
 
 
@@ -232,8 +233,9 @@ def spawn(mut request: SpawnRequest) raises -> c_int:
     """Spawns request.file with stdin from /dev/null and stdout/stderr
     attached to the requested descriptors. Returns the child pid.
 
-    The child starts with an empty signal mask and leads a new process group
-    so that `kill_group` also reaches any processes it starts.
+    The child starts with an empty signal mask and default SIGINT handling,
+    and leads a new process group so that `kill_group` also reaches any
+    processes it starts.
     """
     var actions = List[UInt8](length=SPAWN_FILE_ACTIONS_SIZE, fill=0)
     var attr = List[UInt8](length=SPAWN_ATTR_SIZE, fill=0)
@@ -265,6 +267,12 @@ def spawn(mut request: SpawnRequest) raises -> c_int:
         vp(addr(actions)), request.stderr_fd, c_int(2)
     )
     _ = external_call["sigemptyset", c_int](vp(addr(empty_set)))
+    var default_set = List[UInt8](length=SIGSET_SIZE, fill=0)
+    _ = external_call["sigemptyset", c_int](vp(addr(default_set)))
+    _ = external_call["sigaddset", c_int](vp(addr(default_set)), SIGINT)
+    _ = external_call["posix_spawnattr_setsigdefault", c_int](
+        vp(addr(attr)), vp(addr(default_set))
+    )
     _ = external_call["posix_spawnattr_setsigmask", c_int](
         vp(addr(attr)), vp(addr(empty_set))
     )
@@ -272,7 +280,8 @@ def spawn(mut request: SpawnRequest) raises -> c_int:
         vp(addr(attr)), c_int(0)
     )
     _ = external_call["posix_spawnattr_setflags", c_int](
-        vp(addr(attr)), POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETPGROUP
+        vp(addr(attr)),
+        POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETPGROUP,
     )
 
     var argv = CStringArray(request.argv)
@@ -292,6 +301,7 @@ def spawn(mut request: SpawnRequest) raises -> c_int:
     _ = external_call["posix_spawnattr_destroy", c_int](vp(addr(attr)))
     _ = dev_null^
     _ = empty_set^
+    _ = default_set^
     if rc != 0:
         raise Error(strerror(Int(rc)))
     return pid[0]
@@ -372,23 +382,25 @@ struct PollSet(Movable):
         return (revents & (POLLIN | POLLHUP | POLLERR)) != 0
 
 
-# Write end of the self-pipe used by the SIGINT handler. Mojo has no global
-# variables, so the handler can only reach state through a fixed descriptor.
-comptime INTERRUPT_FD: c_int = 99
-comptime F_SETFL: c_int = 4
+# Large enough for `struct sigaction` on glibc (152 bytes) and Darwin (16).
+# Both layouts start with the handler pointer.
+comptime SIGACTION_WORDS = 32
+comptime SIG_IGN = 1
 
 
-def _o_nonblock() -> c_int:
-    comptime if CompilationTarget.is_macos():
-        return 0x4
-    else:
-        return 0o4000
+def _set_sigint_ignored() -> None:
+    var action = Array[Int, SIGACTION_WORDS](fill=0)
+    action[0] = SIG_IGN
+    _ = external_call["sigaction", c_int](
+        SIGINT, vp(Int(action.unsafe_ptr())), vp(0)
+    )
 
 
 def _on_sigint(sig: c_int) abi("C"):
-    """Async-signal-safe SIGINT handler: records the signal in the pipe."""
-    var byte: UInt8 = 1
-    _ = external_call["write", Int](INTERRUPT_FD, vp(Int(Pointer(to=byte))), 1)
+    """One-shot SIGINT handler: records the signal by switching SIGINT's
+    disposition to ignored. sigaction is async-signal-safe, and later
+    Ctrl-C presses are ignored while mogo-tester shuts down."""
+    _set_sigint_ignored()
 
 
 struct InterruptGuard(Movable):
@@ -396,29 +408,14 @@ struct InterruptGuard(Movable):
     `interrupted()` instead of terminating the process immediately.
 
     The Mojo runtime starts threads before `main`, so blocking the signal
-    with sigprocmask would not cover them. Instead, a process-wide handler
-    writes to a self-pipe that `interrupted()` polls.
+    with sigprocmask would not cover them, and Mojo has no global variables
+    for a handler to set. The handler instead stores the event in the kernel:
+    it sets SIGINT's disposition to ignored, which `interrupted()` queries.
     """
 
-    var read_fd: c_int
     var seen: Bool
 
-    def __init__(out self) raises:
-        var fds = make_pipe()
-        if external_call["dup2", c_int](fds[1], INTERRUPT_FD) < 0:
-            var message = strerror(errno())
-            close_fd(fds[0])
-            close_fd(fds[1])
-            raise Error("install SIGINT handler: ", message)
-        close_fd(fds[1])
-        set_cloexec(INTERRUPT_FD)
-        _ = external_call["fcntl", c_int, num_fixed_args=2](
-            INTERRUPT_FD, F_SETFL, _o_nonblock()
-        )
-        _ = external_call["fcntl", c_int, num_fixed_args=2](
-            fds[0], F_SETFL, _o_nonblock()
-        )
-        self.read_fd = fds[0]
+    def __init__(out self):
         self.seen = False
         comptime Handler = def(c_int) thin abi("C") -> None
         var handler: Handler = _on_sigint
@@ -426,11 +423,15 @@ struct InterruptGuard(Movable):
 
     def interrupted(mut self) -> Bool:
         """Reports whether SIGINT has been received since construction."""
-        if self.seen:
-            return True
-        var buf = List[UInt8](length=16, fill=0)
-        if read_fd(self.read_fd, buf) > 0:
-            self.seen = True
+        if not self.seen:
+            var current = Array[Int, SIGACTION_WORDS](fill=0)
+            if (
+                external_call["sigaction", c_int](
+                    SIGINT, vp(0), vp(Int(current.unsafe_ptr()))
+                )
+                == 0
+            ):
+                self.seen = current[0] == SIG_IGN
         return self.seen
 
 

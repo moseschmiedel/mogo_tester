@@ -9,9 +9,15 @@ from mogo_tester.asan import (
     locate_asan_runtime_with,
     mark_asan_failure,
 )
-from mogo_tester.libc import make_temp_dir
+from mogo_tester.libc import SIGKILL, kill_group, make_temp_dir
 from mogo_tester.paths import remove_all
-from mogo_tester.process import CommandOptions, ProcessResult, run_command
+from mogo_tester.process import (
+    Child,
+    CommandOptions,
+    ProcessResult,
+    poll_children,
+    run_command,
+)
 from mogo_tester.runner import (
     compile_command,
     mojo_build_args_for_file,
@@ -68,6 +74,33 @@ def test_signal_and_missing_executable() raises:
         missing.error,
         'exec: "mogo-no-such-binary": executable file not found in $PATH',
     )
+
+
+def finish_with_background_descendant(options: CommandOptions) raises:
+    var children = List[Child]()
+    children.append(
+        Child(["sh", "-c", "echo before; sleep 30 & exit 0"], options)
+    )
+    var polls = 0
+    while poll_children(children, 100):
+        polls += 1
+        if polls >= 50:
+            kill_group(children[0].pid, SIGKILL)
+            raise Error(
+                "child stayed active while a descendant held its output"
+            )
+    kill_group(children[0].pid, SIGKILL)  # Clean up the background sleep.
+    var r = children[0].result()
+    assert_true(r.succeeded())
+    assert_equal(r.stdout, "before\n")
+
+
+def test_exited_child_finishes_despite_background_descendant_tty() raises:
+    finish_with_background_descendant(CommandOptions.tty())
+
+
+def test_exited_child_finishes_despite_background_descendant_pipes() raises:
+    finish_with_background_descendant(CommandOptions.plain())
 
 
 def test_extra_environment_overrides() raises:

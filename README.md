@@ -152,7 +152,12 @@ exit status.
 
 Pressing Ctrl-C kills the running compile and test processes, including any
 processes they started, prints the summary for the files that finished,
-removes the artifact directory, and exits with status `1`.
+removes the artifact directory, and exits with status `1`. Further Ctrl-C
+presses are ignored during this shutdown.
+
+A test that starts background processes finishes when the test binary itself
+exits. Output that those background processes write afterwards is not
+captured.
 
 ## Module Precompilation
 

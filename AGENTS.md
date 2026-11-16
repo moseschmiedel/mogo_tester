@@ -72,9 +72,15 @@ gh release view TAG --repo moseschmiedel/mogo_tester
 - Process handling uses libc through `external_call` in
   `src/mogo_tester/libc.mojo`: `posix_spawnp` with file actions, PTYs from
   `posix_openpt`, and a single-threaded `poll` loop for parallel jobs.
-- Each child runs in its own process group with an empty signal mask. The
-  parent blocks SIGINT and checks `sigpending` in the poll loop, then kills
-  the child process groups.
+- Each child runs in its own process group with an empty signal mask and
+  default SIGINT handling. Ctrl-C kills the child process groups.
+- SIGINT handling cannot block the signal (the Mojo runtime starts threads
+  before `main`) or set a flag (Mojo has no globals, and fixed descriptors
+  fail under low `ulimit -n`). The one-shot handler sets SIGINT's
+  disposition to `SIG_IGN`, and `InterruptGuard.interrupted()` queries it.
+- A child is finished once it has exited: buffered output is drained, but
+  the run does not wait for EOF from descendants that inherited its stdout
+  or stderr.
 - Test binaries run with PTY-backed combined output when supported, falling back
   to ordinary pipes if PTYs are unsupported.
 - `external_call` declarations must match the stdlib's own declarations of the

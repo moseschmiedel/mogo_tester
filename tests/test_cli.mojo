@@ -245,6 +245,32 @@ def test_honors_parallel_limit() raises:
             assert_true(line.count(".mojo") <= 1, String(line))
 
 
+def test_test_with_background_process_finishes() raises:
+    var box = Sandbox()
+    box.add_test("bg.mojo", "# RUN: echo started\n# RUN: sleep 30 &\n")
+    var r = box.run(["--no-color", box.root + "/t"])
+    assert_equal(r.exit_code, 0)
+    assert_true("run output:\nstarted\nresult: PASS" in r.stdout)
+    assert_true(r.duration_ns < 20_000_000_000, "run waited for the descendant")
+
+
+def test_runs_with_low_descriptor_limit() raises:
+    var box = Sandbox()
+    box.add_test("a.mojo", "# RUN: echo ok\n")
+    var argv: List[String] = [
+        "sh",
+        "-c",
+        'ulimit -n 64 && exec "$0" "$@"',
+        box.bin,
+        "--no-color",
+        box.root + "/t",
+    ]
+    var r = run_command(argv, box.options())
+    assert_equal(r.exit_code, 0, r.stdout + r.stderr)
+    assert_true("result: PASS" in r.stdout)
+    _ = box^  # Keep the sandbox alive until the child has finished.
+
+
 def test_version_and_help() raises:
     var box = Sandbox()
     var version = box.run(["--version"])

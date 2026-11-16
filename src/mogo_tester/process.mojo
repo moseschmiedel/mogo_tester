@@ -28,6 +28,9 @@ from .libc import (
 )
 
 comptime READ_CHUNK = 65536
+# Upper bound on reads after exit, so a descendant that keeps writing to the
+# inherited output cannot stall the run.
+comptime MAX_DRAIN_READS = 256
 
 
 @fieldwise_init
@@ -189,11 +192,42 @@ struct Child(Movable):
         if all_closed:
             self.fds.clear()
 
-    def try_reap(mut self, block: Bool):
-        """Collects the exit status once all output has been drained."""
-        if self.spawn_error != "" or self.status or len(self.fds) > 0:
+    def try_reap(mut self):
+        """Collects the exit status without blocking, independently of
+        whether the output descriptors have reached EOF."""
+        if self.spawn_error != "" or self.status:
             return
-        self.status = wait_pid(self.pid, block)
+        self.status = wait_pid(self.pid, False)
+
+    def finish_output(mut self, mut buf: List[UInt8]):
+        """Drains output that is already buffered once the child has exited,
+        then closes its descriptors.
+
+        Background processes started by the child can inherit its stdout and
+        stderr and keep them open indefinitely, so this does not wait for
+        EOF; output those descendants write later is discarded.
+        """
+        if not self.status or len(self.fds) == 0:
+            return
+        for _ in range(MAX_DRAIN_READS):
+            var open_fds = List[c_int]()
+            var slots = List[Int]()
+            for i in range(len(self.fds)):
+                if self.fds[i] >= 0:
+                    open_fds.append(self.fds[i])
+                    slots.append(i)
+            if len(open_fds) == 0:
+                break
+            var poll_set = PollSet(open_fds)
+            if poll_set.wait(0) <= 0:
+                break
+            for k in range(len(open_fds)):
+                if poll_set.ready(k):
+                    self.read_ready(slots[k], buf)
+        for fd in self.fds:
+            if fd >= 0:
+                close_fd(fd)
+        self.fds.clear()
 
     def result(self) -> ProcessResult:
         """Builds the final result. Only meaningful once `done()`."""
@@ -289,7 +323,7 @@ def poll_children(mut children: List[Child], timeout_ms: Int) -> Bool:
     for c in range(len(children)):
         if children[c].done():
             continue
-        if len(children[c].fds) == 0:
+        if len(children[c].fds) == 0 or children[c].status:
             waiting_for_exit = True
         for i in range(len(children[c].fds)):
             if children[c].fds[i] >= 0:
@@ -317,7 +351,8 @@ def poll_children(mut children: List[Child], timeout_ms: Int) -> Bool:
     var running = False
     for c in range(len(children)):
         children[c].compact()
-        children[c].try_reap(False)
+        children[c].try_reap()
+        children[c].finish_output(buf)
         if not children[c].done():
             running = True
     return running
