@@ -71,6 +71,12 @@ def test_splits_mojo_build_args_after_repeated_args() raises:
     assert_equal(cfg.mojo_build_args, ["-D", "-I", "src", "-g"])
 
 
+def test_collects_repeated_excludes() raises:
+    var cfg = parse_args(["--exclude", "a.mojo", "t", "--exclude=**/b_*.mojo"])
+    assert_equal(cfg.exclude_patterns, ["a.mojo", "**/b_*.mojo"])
+    assert_equal(cfg.test_paths, ["t"])
+
+
 def test_allows_options_after_test_paths() raises:
     var cfg = parse_args(
         [

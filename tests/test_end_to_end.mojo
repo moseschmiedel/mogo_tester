@@ -369,6 +369,38 @@ def test_recursive_discovery_and_empty_dir_warning() raises:
     assert_false("WARNING" in deep.stderr)
 
 
+def test_exclude_skips_files_and_warns_on_unmatched() raises:
+    var box = Sandbox()
+    box.add_test("a_ok.mojo", "# RUN: true\n")
+    box.add_test("b_broken.mojo", "# COMPILE_FAIL\n")
+    box.add_test("c_broken.mojo", "# RUN: exit 3\n")
+    var r = box.run(
+        [
+            "--no-color",
+            "--exclude",
+            "b_broken.mojo",
+            "--exclude",
+            box.root + "/t/c_*.mojo",
+            "--exclude",
+            "gone.mojo",
+            box.root + "/t",
+        ]
+    )
+    assert_equal(r.exit_code, 0, r.stdout + r.stderr)
+    assert_true("SKIP " + box.root + "/t/b_broken.mojo\n" in r.stdout)
+    assert_true("SKIP " + box.root + "/t/c_broken.mojo\n" in r.stdout)
+    assert_true(
+        "Summary: total=1 passed=1 failed_compile=0 failed_run=0 elapsed="
+        in r.stdout
+    )
+    assert_true(" skipped=2\n" in r.stdout)
+    assert_false("broken" in box.log())
+    assert_true(
+        "WARNING::: --exclude pattern gone.mojo matched no test files"
+        in r.stderr
+    )
+
+
 def test_version_and_help() raises:
     var box = Sandbox()
     var version = box.run(["--version"])

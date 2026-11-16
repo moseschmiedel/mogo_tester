@@ -14,6 +14,7 @@ struct Config(Copyable, Movable):
     var parallel: Int
     var mojo_build_args: List[String]
     var precompile_paths: List[Path]
+    var exclude_patterns: List[String]
     var keep_artifacts: Bool
     var recursive: Bool
     var no_color: Bool
@@ -29,6 +30,7 @@ struct Config(Copyable, Movable):
         self.parallel = num_logical_cores()
         self.mojo_build_args = List[String]()
         self.precompile_paths = List[Path]()
+        self.exclude_patterns = List[String]()
         self.keep_artifacts = False
         self.recursive = False
         self.no_color = False
@@ -45,6 +47,7 @@ comptime VALUE_OPTIONS: List[String] = [
     "mojo-build-args",
     "precompile",
     "doctests",
+    "exclude",
 ]
 comptime BOOL_OPTIONS: List[String] = [
     "keep-artifacts",
@@ -178,6 +181,8 @@ def parse_args(args: List[String], out cfg: Config) raises UsageError:
                     split_build_args.append(String(field))
             elif name == "doctests":
                 cfg.doctest_paths.append(Path(value))
+            elif name == "exclude":
+                cfg.exclude_patterns.append(value)
             else:
                 cfg.precompile_paths.append(Path(value))
             continue
@@ -243,6 +248,10 @@ def usage(default_parallel: Int) -> String:
         (
             "  --doctests PATH           run doctests from .mojo and .md files"
             " under PATH; may be repeated\n"
+        ),
+        (
+            "  --exclude GLOB            skip test files matching GLOB; may be"
+            " repeated\n"
         ),
         (
             "  --keep-artifacts          keep compiled binaries and print the"

@@ -12,6 +12,10 @@ All notable changes to this project will be documented in this file.
   documentation source.
 - `--recursive` discovers `.mojo` files in all subdirectories of directory
   operands, sorted by path.
+- `--exclude GLOB` skips discovered test files that match a glob pattern,
+  supporting `*`, `?`, `[...]`, and `**`. Excluded files are printed as
+  `SKIP PATH`, and unmatched patterns produce a warning. Repeatable.
+- The summary line ends with a `skipped=N` field after `elapsed`.
 - A warning is logged for each directory operand that contributes no test
   files, even when other operands found tests.
 

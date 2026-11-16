@@ -39,9 +39,11 @@ struct RunSummary(Copyable, Movable):
     var failed_compile: Int
     var failed_run: Int
     var elapsed_ns: Int
+    var skipped: Int
+    """Files excluded from the run; they are not counted in `total`."""
 
     def __init__(out self):
-        self = Self(0, 0, 0, 0, 0)
+        self = Self(0, 0, 0, 0, 0, 0)
 
     def failed(self) -> Bool:
         return self.failed_compile > 0 or self.failed_run > 0

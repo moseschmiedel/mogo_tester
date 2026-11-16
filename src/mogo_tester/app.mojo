@@ -15,6 +15,7 @@ from .suite.artifacts import sanitize_binary_name
 from .suite.discovery import discover_tests, empty_dir_warning
 from .suite.doctest import discover_doctest_files, scan_doctests
 from .fs.sha256 import hex_encode, sha256
+from .suite.exclude import apply_excludes
 from .toolchain.asan import locate_asan_runtime
 
 
@@ -70,6 +71,11 @@ def run(args: List[String], version: String, mut out: Output) raises:
         for dir in discovery.empty_dirs:
             logger().warning(empty_dir_warning(dir, cfg.recursive))
         paths = discovery.paths.copy()
+    var exclusion = apply_excludes(paths, cfg.exclude_patterns)
+    for pattern in exclusion.unmatched:
+        logger().warning(
+            String("--exclude pattern ", pattern, " matched no test files")
+        )
     var doctest_files = List[Path]()
     if len(cfg.doctest_paths) > 0:
         doctest_files = discover_doctest_files(cfg.doctest_paths)
@@ -82,16 +88,16 @@ def run(args: List[String], version: String, mut out: Output) raises:
 
     try:
         var sources = List[TestSource]()
-        for path in paths:
+        for path in exclusion.kept:
             sources.append(TestSource.file(path))
         if len(cfg.doctest_paths) > 0:
             generate_doctests(doctest_files, artifact_dir, sources)
-            if len(sources) == len(paths):
+            if len(sources) == len(exclusion.kept):
                 var operands = List[String]()
                 for doctest_path in cfg.doctest_paths:
                     operands.append(String(doctest_path))
                 raise Error("no doctests found in ", ", ".join(operands))
-        _run_in(cfg, sources, artifact_dir, out, guard)
+        _run_in(cfg, sources, exclusion.skipped, artifact_dir, out, guard)
     finally:
         if not cfg.keep_artifacts:
             try:
@@ -139,6 +145,7 @@ def generate_doctests(
 def _run_in(
     mut cfg: Config,
     sources: List[TestSource],
+    skipped: List[Path],
     artifact_dir: Path,
     mut out: Output,
     mut guard: InterruptGuard,
@@ -161,10 +168,11 @@ def _run_in(
         String("paths=[", " ".join(operands), "]"),
         String("doctests=[", " ".join(doctest_operands), "]"),
         String("count=", len(sources)),
+        String("skipped=", len(skipped)),
         String("parallel=", cfg.parallel),
     )
 
-    var outcome = run_tests(cfg, sources, artifact_dir, out, guard)
+    var outcome = run_tests(cfg, sources, skipped, artifact_dir, out, guard)
     var summary = outcome[0].copy()
 
     if cfg.keep_artifacts:
