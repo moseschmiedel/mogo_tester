@@ -85,6 +85,9 @@ gh release view TAG --repo moseschmiedel/mogo_tester
 
 - Test discovery is intentionally top-level only; nested `.mojo` files are not
   searched.
+- `--doctests` searches recursively (skipping dot-entries) and generates one
+  program per Modo-style doctest under `<artifact-dir>/doctests`; see
+  `src/mogo_tester/suite/doctest.mojo`.
 - Test paths are sorted before execution.
 - `--mojo-build-arg` is repeatable and preserves exact tokens.
 - `--mojo-build-args` is split with `strings.Fields`.

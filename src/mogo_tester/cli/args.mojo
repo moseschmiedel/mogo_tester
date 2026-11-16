@@ -10,6 +10,7 @@ struct Config(Copyable, Movable):
     """Runtime configuration derived from command-line arguments."""
 
     var test_paths: List[Path]
+    var doctest_paths: List[Path]
     var parallel: Int
     var mojo_build_args: List[String]
     var precompile_paths: List[Path]
@@ -23,6 +24,7 @@ struct Config(Copyable, Movable):
 
     def __init__(out self):
         self.test_paths = List[Path]()
+        self.doctest_paths = List[Path]()
         self.parallel = num_logical_cores()
         self.mojo_build_args = List[String]()
         self.precompile_paths = List[Path]()
@@ -40,6 +42,7 @@ comptime VALUE_OPTIONS: List[String] = [
     "mojo-build-arg",
     "mojo-build-args",
     "precompile",
+    "doctests",
 ]
 comptime BOOL_OPTIONS: List[String] = [
     "keep-artifacts",
@@ -170,6 +173,8 @@ def parse_args(args: List[String], out cfg: Config) raises UsageError:
                 split_build_args.clear()
                 for field in value.split():
                     split_build_args.append(String(field))
+            elif name == "doctests":
+                cfg.doctest_paths.append(Path(value))
             else:
                 cfg.precompile_paths.append(Path(value))
             continue
@@ -199,17 +204,17 @@ def parse_args(args: List[String], out cfg: Config) raises UsageError:
     if cfg.show_version:
         return
 
-    if len(cfg.test_paths) == 0:
+    if len(cfg.test_paths) == 0 and len(cfg.doctest_paths) == 0:
         raise UsageError("usage: mogo-tester [options] <test-path>...", False)
 
 
 def usage(default_parallel: Int) -> String:
     """Returns the help text with the platform default parallelism."""
     return String(
-        "Usage: mogo-tester [OPTION...] TEST-PATH...\n\n",
+        "Usage: mogo-tester [OPTION...] [TEST-PATH...]\n\n",
         (
             "Compile and run Mojo test files from directories or direct .mojo"
-            " files.\n\n"
+            " files, and doctests from --doctests paths.\n\n"
         ),
         "Options:\n",
         (
@@ -229,6 +234,10 @@ def usage(default_parallel: Int) -> String:
         (
             "  --precompile PATH         precompile Mojo package before"
             " building tests; may be repeated\n"
+        ),
+        (
+            "  --doctests PATH           run doctests from .mojo and .md files"
+            " under PATH; may be repeated\n"
         ),
         (
             "  --keep-artifacts          keep compiled binaries and print the"

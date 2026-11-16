@@ -123,6 +123,86 @@ def test_reports_pass_compile_failure_and_run_failure() raises:
     assert_equal(len(box.artifact_dirs()), 0)
 
 
+def test_runs_doctests_without_test_paths() raises:
+    var box = Sandbox()
+    makedirs(box.root + "/docs/nested")
+    makedirs(box.root + "/docs/.hidden")
+    write_file(
+        box.root + "/docs/guide.md",
+        (
+            '```mojo {doctest="ok" global=true}\n'
+            "# RUN: echo doc-ok\n"
+            "```\n"
+            '```mojo {doctest="ok"}\n'
+            "print(1)\n"
+            "```\n"
+            '```mojo {doctest="clash" global=true}\n'
+            "def main():\n"
+            "    pass\n"
+            "```\n"
+            '```mojo {doctest="clash"}\n'
+            "main()\n"
+            "```\n"
+        ),
+    )
+    write_file(
+        box.root + "/docs/nested/lib.mojo",
+        (
+            'def f():\n    """Doc.\n\n    ```mojo {doctest="broken"'
+            ' global=true}\n    # COMPILE_FAIL\n    ```\n    """\n'
+            "    pass\n"
+        ),
+    )
+    write_file(
+        box.root + "/docs/.hidden/skip.md",
+        '```mojo {doctest="hidden" global=true}\n# COMPILE_FAIL\n```\n',
+    )
+    var r = box.run(["--no-color", "--doctests", box.root + "/docs"])
+    assert_equal(r.exit_code, 1)
+    assert_true(
+        "Summary: total=3 passed=1 failed_compile=2 failed_run=0" in r.stdout
+    )
+    var docs = box.root + "/docs"
+    assert_true("=== " + docs + "/guide.md:1#ok ===" in r.stdout)
+    assert_true("run output:\ndoc-ok\nresult: PASS" in r.stdout)
+    assert_true("=== " + docs + "/guide.md:7#clash ===" in r.stdout)
+    assert_true("doctest: global blocks define `def main`" in r.stdout)
+    assert_true("=== " + docs + "/nested/lib.mojo:4#broken ===" in r.stdout)
+    assert_false("hidden" in r.stdout)
+    var log = box.log()
+    assert_true("/doctests/guide.md_ok-" in log)
+    assert_false("clash" in log)
+    assert_equal(len(box.artifact_dirs()), 0)
+
+
+def test_doctests_combine_with_tests_and_require_doctests() raises:
+    var box = Sandbox()
+    makedirs(box.root + "/docs")
+    box.add_test("a.mojo", "# RUN: true\n")
+    var empty_dir = box.run(["--doctests", box.root + "/docs"])
+    assert_equal(empty_dir.exit_code, 1)
+    assert_true("no doctests found in " in empty_dir.stderr)
+
+    write_file(box.root + "/docs/empty.md", "No doctests here.\n")
+    var none = box.run(["--doctests", box.root + "/docs", box.root + "/t"])
+    assert_equal(none.exit_code, 1)
+    assert_true("no doctests found in " in none.stderr)
+
+    write_file(
+        box.root + "/docs/one.md",
+        '```mojo {doctest="x" global=true}\n# RUN: true\n```\n',
+    )
+    var both = box.run(
+        ["--no-color", "--doctests", box.root + "/docs", box.root + "/t"]
+    )
+    assert_equal(both.exit_code, 0)
+    assert_true("Summary: total=2 passed=2" in both.stdout)
+
+    var missing = box.run(["--doctests", box.root + "/nope"])
+    assert_equal(missing.exit_code, 1)
+    assert_true("no such file or directory" in missing.stderr)
+
+
 def test_all_passing_exits_zero_with_colors() raises:
     var box = Sandbox()
     box.add_test("ok.mojo", "# RUN: echo fine\n")
@@ -273,7 +353,9 @@ def test_version_and_help() raises:
     var help = box.run(["--help"])
     assert_equal(help.exit_code, 0)
     assert_true(
-        help.stdout.startswith("Usage: mogo-tester [OPTION...] TEST-PATH...\n")
+        help.stdout.startswith(
+            "Usage: mogo-tester [OPTION...] [TEST-PATH...]\n"
+        )
     )
 
 

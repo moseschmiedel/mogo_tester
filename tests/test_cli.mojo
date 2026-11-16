@@ -15,6 +15,14 @@ def test_requires_test_path() raises:
     assert_equal(parse_error([]), "usage: mogo-tester [options] <test-path>...")
 
 
+def test_doctests_replace_test_paths() raises:
+    var cfg = parse_args(["--doctests", "docs", "--doctests=src"])
+    assert_equal(len(cfg.doctest_paths), 2)
+    assert_equal(String(cfg.doctest_paths[0]), "docs")
+    assert_equal(String(cfg.doctest_paths[1]), "src")
+    assert_equal(len(cfg.test_paths), 0)
+
+
 def test_rejects_invalid_parallel() raises:
     assert_equal(
         parse_error(["--parallel", "0", "test"]), "parallel must be >= 1"
