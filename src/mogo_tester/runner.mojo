@@ -1,21 +1,13 @@
 """Precompilation and the parallel compile/run scheduler."""
 
 from std.os import isatty
+from std.pathlib import Path
+from std.time import monotonic
 
 from .args import Config
-from .asan import (
-    asan_reported,
-    file_skips_asan,
-    file_skips_debug,
-    mark_asan_failure,
-)
-from .libc import InterruptGuard
-from .paths import (
-    base_name,
-    binary_path_for,
-    clean_path,
-    precompiled_package_path_for,
-)
+from .asan import asan_reported, mark_asan_failure
+from .markers import SourceMarkers, read_markers
+from .paths import binary_path_for, package_name, precompiled_package_path_for
 from .process import (
     Child,
     CommandOptions,
@@ -38,7 +30,7 @@ from .report import (
     print_result_block,
     print_summary,
 )
-from std.time import monotonic
+from .signals import InterruptGuard
 
 
 comptime POLL_INTERVAL_MS = 100
@@ -60,7 +52,7 @@ struct Reporter(Movable):
         self.live = live
         self.visible = False
 
-    def on_progress(mut self, mut out: Output, path: String, stage: Int):
+    def on_progress(mut self, mut out: Output, path: Path, stage: Int):
         self.progress.update(path, stage)
         print_progress(out, self.progress, self.live)
         self.visible = self.live
@@ -96,66 +88,66 @@ struct Job(Movable):
         self.use_asan = use_asan
 
 
-def mojo_build_args_for_file(args: List[String], path: String) -> List[String]:
-    """Returns build arguments for path, dropping `-g` for files with the
-    `# SKIP_DEBUG` marker."""
-    if not file_skips_debug(path):
-        return args.copy()
-    var filtered = List[String]()
+def mojo_build_args_for_file(
+    args: List[String], markers: SourceMarkers, out result: List[String]
+):
+    """Returns the build arguments for one file, dropping `-g` when the file
+    has the `# SKIP_DEBUG` marker."""
+    result = List[String](capacity=len(args))
     for arg in args:
-        if arg != "-g":
-            filtered.append(arg)
-    return filtered^
+        if not (markers.skip_debug and arg == "-g"):
+            result.append(arg)
 
 
 def compile_command(
-    cfg: Config, path: String, binary_path: String, use_asan: Bool
-) -> List[String]:
+    cfg: Config,
+    path: Path,
+    binary_path: Path,
+    markers: SourceMarkers,
+    use_asan: Bool,
+    out argv: List[String],
+):
     """Builds the `mojo build` argv for one test file."""
-    var argv: List[String] = ["mojo", "build"]
-    for arg in mojo_build_args_for_file(cfg.mojo_build_args, path):
-        argv.append(arg)
-    if cfg.precompile_import_dir != "":
+    argv = ["mojo", "build"]
+    argv.extend(mojo_build_args_for_file(cfg.mojo_build_args, markers))
+    if cfg.precompile_import_dir:
         argv.append("-I")
-        argv.append(cfg.precompile_import_dir)
+        argv.append(String(cfg.precompile_import_dir.value()))
     if use_asan:
         argv.append("--sanitize")
         argv.append("address")
-        for arg in cfg.asan_runtime.build_args:
-            argv.append(arg)
+        argv.extend(cfg.asan_runtime.build_args.copy())
     argv.append("-o")
-    argv.append(binary_path)
-    argv.append(path)
-    return argv^
+    argv.append(String(binary_path))
+    argv.append(String(path))
 
 
-def run_options(cfg: Config, use_asan: Bool) -> CommandOptions:
+def run_options(cfg: Config, use_asan: Bool, out options: CommandOptions):
     """Returns PTY-backed options for a test binary, with the ASAN preload
     variable when needed."""
-    var options = CommandOptions.tty()
+    options = CommandOptions.tty()
     if use_asan:
-        options.env.append(
-            cfg.asan_runtime.preload_var + "=" + cfg.asan_runtime.lib_path
+        options.env.set(
+            cfg.asan_runtime.preload_var, String(cfg.asan_runtime.lib_path)
         )
-    return options^
 
 
 def precompile_modules(
     cfg: Config,
-    artifact_dir: String,
+    artifact_dir: Path,
     mut out: Output,
     mut guard: InterruptGuard,
 ) raises:
     """Runs `mojo precompile` for each requested package before tests are
-    built. The .mojoc basename must match the package basename because Mojo
-    uses it as the import name, so duplicate basenames are rejected."""
+    built. The .mojoc file name must match the package name because Mojo
+    uses it as the import name, so duplicate package names are rejected."""
     for i in range(len(cfg.precompile_paths)):
-        var base = base_name(clean_path(cfg.precompile_paths[i]))
+        var name = package_name(cfg.precompile_paths[i])
         for j in range(i):
-            if base_name(clean_path(cfg.precompile_paths[j])) == base:
+            if package_name(cfg.precompile_paths[j]) == name:
                 raise Error(
                     'precompile package basename "',
-                    base,
+                    name,
                     '" is used by both ',
                     cfg.precompile_paths[j],
                     " and ",
@@ -168,11 +160,11 @@ def precompile_modules(
             "mojo",
             "precompile",
             "-o",
-            precompiled_package_path_for(artifact_dir, path),
-            path,
+            String(precompiled_package_path_for(artifact_dir, path)),
+            String(path),
         ]
         var outcome = run_command(command, CommandOptions.tty(), guard)
-        var result = outcome[0].copy()
+        ref result = outcome[0]
         print_precompile_block(out, path, command, result, colors)
         if outcome[1]:
             raise Error("interrupted")
@@ -189,8 +181,8 @@ def precompile_modules(
 
 def run_tests(
     cfg: Config,
-    paths: List[String],
-    artifact_dir: String,
+    paths: List[Path],
+    artifact_dir: Path,
     mut out: Output,
     mut guard: InterruptGuard,
 ) -> Tuple[RunSummary, Bool]:
@@ -216,9 +208,12 @@ def run_tests(
         while not cancelled and len(jobs) < cfg.parallel and next < len(paths):
             var path = paths[next]
             next += 1
-            var use_asan = cfg.asan and not file_skips_asan(path)
+            var markers = read_markers(path)
+            var use_asan = cfg.asan and not markers.skip_asan
             var binary_path = binary_path_for(artifact_dir, path)
-            var command = compile_command(cfg, path, binary_path, use_asan)
+            var command = compile_command(
+                cfg, path, binary_path, markers, use_asan
+            )
             reporter.on_progress(out, path, STAGE_COMPILING)
             children.append(Child(command, CommandOptions.plain()))
             jobs.append(
@@ -256,14 +251,14 @@ def run_tests(
                         out, jobs[i].result.path, STAGE_RUNNING
                     )
                     children[i] = Child(
-                        [jobs[i].result.binary_path],
+                        [String(jobs[i].result.binary_path)],
                         run_options(cfg, jobs[i].use_asan),
                     )
                     i += 1
                     continue
             else:
                 if jobs[i].use_asan and asan_reported(finished):
-                    finished = mark_asan_failure(finished^)
+                    mark_asan_failure(finished)
                 jobs[i].result.run = finished^
             reporter.on_progress(out, jobs[i].result.path, STAGE_DONE)
             var job = jobs.pop(i)

@@ -7,8 +7,9 @@ from std.os import getenv, listdir, makedirs
 from std.os.path import exists, realpath
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from mogo_tester.libc import SIGINT, kill_pid, make_temp_dir
-from mogo_tester.paths import remove_all
+from mogo_tester import libc
+from mogo_tester.env import Environment
+from mogo_tester.paths import make_temp_dir, remove_all
 from mogo_tester.process import (
     Child,
     CommandOptions,
@@ -48,7 +49,7 @@ struct Sandbox(Movable):
     var bin: String
 
     def __init__(out self) raises:
-        self.root = make_temp_dir("mogo-cli-")
+        self.root = String(make_temp_dir("mogo-cli-"))
         makedirs(self.root + "/fake")
         makedirs(self.root + "/tmp")
         makedirs(self.root + "/t")
@@ -62,14 +63,11 @@ struct Sandbox(Movable):
         write_file(self.root + "/t/" + name, body)
 
     def options(self) -> CommandOptions:
-        return CommandOptions(
-            False,
-            [
-                "PATH=" + self.root + "/fake:" + getenv("PATH"),
-                "MOGO_FAKE_LOG=" + self.root + "/log",
-                "TMPDIR=" + self.root + "/tmp",
-            ],
-        )
+        var env = Environment()
+        env.set("PATH", self.root + "/fake:" + getenv("PATH"))
+        env.set("MOGO_FAKE_LOG", self.root + "/log")
+        env.set("TMPDIR", self.root + "/tmp")
+        return CommandOptions(False, env^)
 
     def run(self, args: List[String]) -> ProcessResult:
         var argv: List[String] = [self.bin]
@@ -121,11 +119,11 @@ def test_reports_pass_compile_failure_and_run_failure() raises:
     assert_false("\x1b[" in r.stdout)
     assert_true("PROGRESS [3/3]\n" in r.stdout)
     assert_true(
-        'msg="application failed" error="test run failed: 1 compile failure(s),'
-        ' 1 run failure(s)"'
+        "ERROR::: application failed: test run failed: 1 compile failure(s),"
+        " 1 run failure(s)"
         in r.stderr
     )
-    assert_true('msg="running mojo tests"' in r.stderr)
+    assert_true("INFO::: running mojo tests paths=[" in r.stderr)
     assert_equal(len(box.artifact_dirs()), 0)
 
 
@@ -195,7 +193,7 @@ def test_rejects_duplicate_precompile_basenames() raises:
     )
     assert_equal(r.exit_code, 1)
     assert_true(
-        'precompile package basename \\"shared\\" is used by both x/shared and'
+        'precompile package basename "shared" is used by both x/shared and'
         " y/shared"
         in r.stderr
     )
@@ -295,12 +293,12 @@ def test_interrupt_kills_tests_and_cleans_up() raises:
     while poll_children(children, 100):
         polls += 1
         if not sent and polls >= 10:
-            kill_pid(children[0].pid, SIGINT)
+            _ = libc.kill(children[0].pid, libc.SIGINT)
             sent = True
         assert_true(polls < 100, "mogo-tester did not stop after SIGINT")
     var r = children[0].result()
     assert_equal(r.exit_code, 1)
-    assert_true("error=interrupted" in r.stderr)
+    assert_true("ERROR::: application failed: interrupted" in r.stderr)
     assert_true("run: FAIL exit=-1" in r.stdout)
     assert_true("signal: killed" in r.stdout)
     assert_equal(len(box.artifact_dirs()), 0)
@@ -322,11 +320,11 @@ def test_interrupt_during_precompile() raises:
     while poll_children(children, 100):
         polls += 1
         if polls == 10:
-            kill_pid(children[0].pid, SIGINT)
+            _ = libc.kill(children[0].pid, libc.SIGINT)
         assert_true(polls < 100, "mogo-tester did not stop after SIGINT")
     var r = children[0].result()
     assert_equal(r.exit_code, 1)
-    assert_true("error=interrupted" in r.stderr)
+    assert_true("ERROR::: application failed: interrupted" in r.stderr)
     assert_false("build" in box.log())
     assert_equal(len(box.artifact_dirs()), 0)
 

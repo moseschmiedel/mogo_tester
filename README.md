@@ -203,14 +203,19 @@ pixi add clang --platform osx-arm64
 pixi add clang --platform linux-64
 ```
 
-To disable ASAN for one Mojo file, add this marker anywhere in the file:
+To disable ASAN for one Mojo file, add this marker to the comment header at
+the top of the file:
 
 ```mojo
 # SKIP_ASAN
 ```
 
-Currently, ASAN runtime lookup is configured for Apple silicon macOS and Linux
-x86_64.
+The comment header is the run of lines at the start of the file that are blank
+or start with `#`. `mogo-tester` stops reading at the first other line, so a
+marker after that line has no effect.
+
+Currently, ASAN runtime lookup is configured for `aarch64-apple-macosx` and
+`x86_64-unknown-linux-gnu`.
 
 ## Troubleshooting
 
@@ -227,7 +232,7 @@ file.
 must be passed as an exact token, use repeated `--mojo-build-arg` flags instead.
 
 To disable the exact debug build argument `-g` for one Mojo file, add this marker
-at the top of the file:
+to the comment header at the top of the file:
 
 ```mojo
 # SKIP_DEBUG

@@ -72,7 +72,7 @@ def _rotr(x: UInt32, n: UInt32) -> UInt32:
     return (x >> n) | (x << (32 - n))
 
 
-def sha256(data: Span[UInt8, _]) -> List[UInt8]:
+def sha256(data: Span[UInt8, _], out digest: List[UInt8]):
     """Returns the 32-byte SHA-256 digest of data."""
     var k = materialize[_K]()
     var h: List[UInt32] = [
@@ -147,18 +147,16 @@ def sha256(data: Span[UInt8, _]) -> List[UInt8]:
         h[6] += g
         h[7] += hh
 
-    var digest = List[UInt8](capacity=32)
+    digest = List[UInt8](capacity=32)
     for i in range(8):
         for shift in [24, 16, 8, 0]:
             digest.append(UInt8((h[i] >> UInt32(shift)) & 0xFF))
-    return digest^
 
 
-def hex_encode(data: Span[UInt8, _]) -> String:
+def hex_encode(data: Span[UInt8, _], out text: String):
     """Returns lowercase hexadecimal text for data."""
     comptime digits = "0123456789abcdef"
-    var out = String(capacity_bytes=len(data) * 2)
+    text = String(capacity_bytes=len(data) * 2)
     for b in data:
-        out += digits[byte=Int(b >> 4)]
-        out += digits[byte=Int(b & 0xF)]
-    return out^
+        text += digits[byte=Int(b >> 4)]
+        text += digits[byte=Int(b & 0xF)]

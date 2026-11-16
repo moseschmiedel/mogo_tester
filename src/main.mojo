@@ -7,7 +7,7 @@ Release builds inject version metadata with `-D MOGO_VERSION=...`,
 from std.sys import argv, exit
 from std.sys.defines import get_defined_string
 
-from mogo_tester.app import format_version, log, run
+from mogo_tester.app import format_version, logger, run
 from mogo_tester.report import Output
 
 
@@ -30,5 +30,5 @@ def main():
     try:
         run(args, resolved_version(), out)
     except e:
-        log("ERROR", "application failed", [("error", String(e))])
+        logger().error("application failed:", e)
         exit(1)

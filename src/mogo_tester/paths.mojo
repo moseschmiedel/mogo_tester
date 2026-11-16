@@ -1,19 +1,28 @@
-"""Path helpers, test discovery, and artifact naming."""
+"""Test discovery, artifact naming, and filesystem helpers built on
+`std.pathlib.Path`."""
 
-from std.os import listdir, remove, rmdir
-from std.os.path import exists, isdir, islink
+from std.os import getenv, remove, rmdir
+from std.os.path import islink
+from std.pathlib import Path
 
+from . import libc
+from .cffi import addr
 from .sha256 import hex_encode, sha256
 
 
-def clean_path(path: String) -> String:
+def clean(path: Path) -> Path:
     """Returns the shortest equivalent path by lexical processing, like Go's
-    filepath.Clean: collapses separators and resolves `.` and `..`."""
-    if path == "":
-        return "."
-    var rooted = path.startswith("/")
+    filepath.Clean: collapses separators and resolves `.` and `..`.
+
+    `Path` keeps paths verbatim, so this normalizes operands such as
+    `./test/` before they are joined, displayed, or hashed.
+    """
+    var text = path.path
+    if text == "":
+        return Path(".")
+    var rooted = text.startswith("/")
     var parts = List[String]()
-    for raw in path.split("/"):
+    for raw in path.parts():
         var part = String(raw)
         if part == "" or part == ".":
             continue
@@ -26,51 +35,32 @@ def clean_path(path: String) -> String:
         parts.append(part)
     var joined = "/".join(parts)
     if rooted:
-        return "/" + joined
+        return Path("/" + joined)
     if joined == "":
-        return "."
-    return joined^
+        return Path(".")
+    return Path(joined)
 
 
-def join_path(dir: String, name: String) -> String:
-    """Joins two path elements and cleans the result."""
-    if dir == "":
-        return clean_path(name)
-    return clean_path(dir + "/" + name)
+def package_name(path: Path) -> String:
+    """Returns the importable package name for a package directory, which
+    is its last path element."""
+    return clean(path).name()
 
 
-def base_name(path: String) -> String:
-    """Returns the last element of path, like Go's filepath.Base."""
-    if path == "":
-        return "."
-    var trimmed = String(path.rstrip("/"))
-    if trimmed == "":
-        return "/"
-    var index = trimmed.rfind("/")
-    if index < 0:
-        return trimmed^
-    return String(trimmed[byte = index + 1 : trimmed.byte_length()])
-
-
-def extension(path: String) -> String:
-    """Returns the suffix starting at the final dot of the last element."""
-    var base = base_name(path)
-    var index = base.rfind(".")
-    if index < 0:
-        return ""
-    return String(base[byte = index : base.byte_length()])
-
-
-def discover_tests(test_paths: List[String]) raises -> List[String]:
+def discover_tests(test_paths: List[Path], out result: List[Path]) raises:
     """Returns the .mojo files selected by test_paths.
 
     Directory operands contribute their sorted top-level .mojo files; nested
     directories are not searched. File operands are kept in operand order and
     must have a .mojo extension.
+
+    Raises:
+        Error: If an operand does not exist, a file operand is not a .mojo
+            file, or no test files are found at all.
     """
-    var paths = List[String]()
+    result = List[Path]()
     for test_path in test_paths:
-        if not exists(test_path):
+        if not test_path.exists():
             raise Error(
                 "discover tests in ",
                 test_path,
@@ -78,38 +68,38 @@ def discover_tests(test_paths: List[String]) raises -> List[String]:
                 test_path,
                 ": no such file or directory",
             )
-        if isdir(test_path):
-            for p in discover_tests_in_dir(test_path):
-                paths.append(p)
+        if test_path.is_dir():
+            result.extend(discover_tests_in_dir(test_path))
             continue
-        if not base_name(test_path).endswith(".mojo"):
+        if test_path.suffix() != ".mojo":
             raise Error("test file ", test_path, " must have .mojo extension")
-        paths.append(test_path)
+        result.append(test_path)
 
-    if len(paths) == 0:
-        raise Error("no .mojo test files found in ", ", ".join(test_paths))
-    return paths^
+    if len(result) == 0:
+        var operands = List[String]()
+        for test_path in test_paths:
+            operands.append(String(test_path))
+        raise Error("no .mojo test files found in ", ", ".join(operands))
 
 
-def discover_tests_in_dir(dir: String) raises -> List[String]:
-    """Returns sorted top-level .mojo files in dir."""
-    var names: List[String]
+def discover_tests_in_dir(dir: Path, out result: List[Path]) raises:
+    """Returns the sorted top-level .mojo files in dir."""
+    var entries: List[Path]
     try:
-        names = listdir(dir)
+        entries = dir.listdir()
     except e:
         raise Error("discover tests in ", dir, ": ", e)
-    var paths = List[String]()
-    for name in names:
-        var path = join_path(dir, name)
-        if name.endswith(".mojo") and not isdir(path):
-            paths.append(path)
-    sort(Span(paths))
-    return paths^
+    result = List[Path]()
+    for entry in entries:
+        var path = clean(dir / entry.path)
+        if path.suffix() == ".mojo" and not path.is_dir():
+            result.append(path)
+    sort(Span(result))
 
 
-def sanitize_binary_name(name: String) -> String:
-    """Replaces characters outside [A-Za-z0-9._-] with underscores."""
-    var out = String("")
+def sanitize_binary_name(name: String, out result: String):
+    """Replaces characters outside `[A-Za-z0-9._-]` with underscores."""
+    result = String("")
     for cp in name.codepoints():
         var c = Int(cp)
         if (
@@ -120,43 +110,56 @@ def sanitize_binary_name(name: String) -> String:
             or c == ord("_")
             or c == ord(".")
         ):
-            out += String(cp)
+            result += String(cp)
         else:
-            out += "_"
-    if out == "":
-        return "test"
-    return out^
+            result += "_"
+    if result == "":
+        result = "test"
 
 
-def binary_path_for(artifact_dir: String, path: String) -> String:
+def binary_path_for(artifact_dir: Path, path: Path) -> Path:
     """Derives a filesystem-safe artifact path for a source file. A hash of
-    the full path keeps identical basenames from colliding."""
-    var base = base_name(path)
-    var ext = extension(path)
-    if ext != "":
-        var stem = String(
-            base[byte = 0 : base.byte_length() - ext.byte_length()]
-        )
-        base = stem^
-    var digest = hex_encode(sha256(path.as_bytes()))
-    var name = sanitize_binary_name(base) + "-" + String(digest[byte=0:10])
-    return join_path(artifact_dir, name)
+    the full path keeps identical file names from colliding."""
+    var name = path.name()
+    var stem = String(
+        name[byte = 0 : name.byte_length() - path.suffix().byte_length()]
+    )
+    var digest = hex_encode(sha256(String(path).as_bytes()))
+    return artifact_dir / (
+        sanitize_binary_name(stem) + "-" + String(digest[byte=0:10])
+    )
 
 
-def precompiled_package_path_for(artifact_dir: String, path: String) -> String:
-    """Returns the .mojoc path whose basename becomes the importable package
+def precompiled_package_path_for(artifact_dir: Path, path: Path) -> Path:
+    """Returns the .mojoc path whose file name becomes the importable package
     name."""
-    return join_path(artifact_dir, base_name(clean_path(path)) + ".mojoc")
+    return artifact_dir / (package_name(path) + ".mojoc")
 
 
-def remove_all(path: String) raises:
+def make_temp_dir(prefix: String) raises -> Path:
+    """Creates a unique mode-0700 directory under `$TMPDIR` (or /tmp).
+
+    Raises:
+        Error: If mkdtemp(3) fails.
+    """
+    var root = String(getenv("TMPDIR", "/tmp").rstrip("/"))
+    var template = String(root, "/", prefix, "XXXXXXXX")
+    var bytes = List[UInt8](template.as_bytes())
+    bytes.append(0)
+    if libc.mkdtemp(addr(bytes)) == 0:
+        raise Error("mkdtemp ", template, ": ", libc.strerror(libc.errno()))
+    # mkdtemp fills in the template in place.
+    return Path(String(unsafe_from_utf8=Span(bytes)[0 : len(bytes) - 1]))
+
+
+def remove_all(path: Path) raises:
     """Removes path and everything below it. Symlinks are removed, not
     followed."""
-    if islink(path) or (exists(path) and not isdir(path)):
+    if islink(path) or (path.exists() and not path.is_dir()):
         remove(path)
         return
-    if not exists(path):
+    if not path.exists():
         return
-    for name in listdir(path):
-        remove_all(join_path(path, name))
+    for entry in path.listdir():
+        remove_all(path / entry.path)
     rmdir(path)

@@ -6,22 +6,18 @@ child reports `done()`.
 """
 
 from std.ffi import c_int
+from std.pathlib import Path
 from std.time import monotonic
 
-from std.os import getenv
-
-from .libc import (
-    is_executable,
-    InterruptGuard,
-    PollSet,
-    SIGKILL,
+from .env import Environment
+from .fd import PollSet, close_fd, make_pipe, read_fd
+from .libc import SIGKILL
+from .pty import open_pty
+from .signals import InterruptGuard
+from .spawn import (
     SpawnRequest,
-    close_fd,
-    current_environment,
     kill_group,
-    make_pipe,
-    open_pty,
-    read_fd,
+    look_path,
     signal_name,
     spawn,
     wait_pid,
@@ -65,18 +61,19 @@ struct ProcessResult(Copyable, Movable):
 
 @fieldwise_init
 struct CommandOptions(Copyable, Movable):
-    """Execution options: PTY-backed output and extra environment entries."""
+    """Execution options: PTY-backed output, and environment variables that
+    override the inherited environment."""
 
     var fake_tty: Bool
-    var env: List[String]
+    var env: Environment
 
     @staticmethod
     def plain() -> Self:
-        return Self(False, List[String]())
+        return Self(False, Environment())
 
     @staticmethod
     def tty() -> Self:
-        return Self(True, List[String]())
+        return Self(True, Environment())
 
 
 struct Child(Movable):
@@ -103,13 +100,14 @@ struct Child(Movable):
         self.status = None
         self.spawn_error = ""
 
-        var file: String
+        var file: Path
         try:
             file = look_path(argv[0])
         except e:
             self.spawn_error = String(e)
             return
-        var env = _merge_env(current_environment(), options.env)
+        var env = Environment.current()
+        env.update(options.env)
 
         if options.fake_tty:
             try:
@@ -192,22 +190,28 @@ struct Child(Movable):
         if all_closed:
             self.fds.clear()
 
-    def try_reap(mut self):
+    def try_reap(mut self) -> Bool:
         """Collects the exit status without blocking, independently of
-        whether the output descriptors have reached EOF."""
-        if self.spawn_error != "" or self.status:
-            return
-        self.status = wait_pid(self.pid, False)
+        whether the output descriptors have reached EOF.
+
+        Returns:
+            Whether the child's exit status is known.
+        """
+        if self.spawn_error != "":
+            return False
+        if not self.status:
+            self.status = wait_pid(self.pid)
+        return Bool(self.status)
 
     def finish_output(mut self, mut buf: List[UInt8]):
-        """Drains output that is already buffered once the child has exited,
-        then closes its descriptors.
+        """Drains output that is already buffered and closes the descriptors.
+        Call this only once the child has exited.
 
         Background processes started by the child can inherit its stdout and
         stderr and keep them open indefinitely, so this does not wait for
         EOF; output those descendants write later is discarded.
         """
-        if not self.status or len(self.fds) == 0:
+        if len(self.fds) == 0:
             return
         for _ in range(MAX_DRAIN_READS):
             var open_fds = List[c_int]()
@@ -229,13 +233,13 @@ struct Child(Movable):
                 close_fd(fd)
         self.fds.clear()
 
-    def result(self) -> ProcessResult:
+    def result(self, out result: ProcessResult):
         """Builds the final result. Only meaningful once `done()`."""
         var duration = Int(monotonic() - self.start_ns)
         if self.spawn_error != "":
-            var r = ProcessResult.failed(self.spawn_error)
-            r.duration_ns = duration
-            return r^
+            result = ProcessResult.failed(self.spawn_error)
+            result.duration_ns = duration
+            return
         var status = Int(self.status.value())
         var exit_code: Int
         var error = String("")
@@ -249,7 +253,7 @@ struct Child(Movable):
         var stdout = String(from_utf8_lossy=Span(self.stdout))
         if self.combined:
             stdout = normalize_pty_output(stdout)
-        return ProcessResult(
+        result = ProcessResult(
             stdout^,
             String(from_utf8_lossy=Span(self.stderr)),
             self.combined,
@@ -261,49 +265,6 @@ struct Child(Movable):
 
 def _spawn_error(argv: List[String], e: Error) -> String:
     return String("fork/exec ", argv[0], ": ", e)
-
-
-def look_path(name: String) raises -> String:
-    """Resolves name like a shell would: names containing a slash are used
-    as-is, others are searched in the directories of $PATH.
-
-    Raises:
-        Error: If no executable file is found.
-    """
-    if "/" in name:
-        return name
-    var path = getenv("PATH")
-    for raw in path.split(":"):
-        var dir = String(raw)
-        if dir == "":
-            dir = "."
-        var candidate = dir + "/" + name
-        if is_executable(candidate):
-            return candidate^
-    raise Error('exec: "', name, '": executable file not found in $PATH')
-
-
-def _merge_env(base: List[String], extra: List[String]) -> List[String]:
-    """Appends extra KEY=VALUE entries, replacing existing keys."""
-    var result = List[String]()
-    for entry in base:
-        var key = _env_key(entry)
-        var overridden = False
-        for e in extra:
-            if _env_key(e) == key:
-                overridden = True
-        if not overridden:
-            result.append(entry)
-    for e in extra:
-        result.append(e)
-    return result^
-
-
-def _env_key(entry: String) -> String:
-    var index = entry.find("=")
-    if index < 0:
-        return entry
-    return String(entry[byte=0:index])
 
 
 def normalize_pty_output(output: String) -> String:
@@ -351,8 +312,8 @@ def poll_children(mut children: List[Child], timeout_ms: Int) -> Bool:
     var running = False
     for c in range(len(children)):
         children[c].compact()
-        children[c].try_reap()
-        children[c].finish_output(buf)
+        if children[c].try_reap():
+            children[c].finish_output(buf)
         if not children[c].done():
             running = True
     return running

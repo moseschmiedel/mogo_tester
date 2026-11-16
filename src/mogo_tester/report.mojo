@@ -1,6 +1,7 @@
 """Progress, per-file result blocks, and the final summary."""
 
-from .paths import base_name
+from std.pathlib import Path
+
 from .process import ProcessResult
 
 
@@ -58,12 +59,12 @@ struct Colors(Copyable, Movable):
 struct FileResult(Copyable, Movable):
     """Compile and run outcome for one test source file."""
 
-    var path: String
+    var path: Path
     var compile_cmd: List[String]
     var compile: ProcessResult
     var run: ProcessResult
     var did_run: Bool
-    var binary_path: String
+    var binary_path: Path
 
     def passed(self) -> Bool:
         return (
@@ -115,16 +116,16 @@ struct ProgressTracker(Movable):
 
     var total: Int
     var completed: Int
-    var paths: List[String]
+    var paths: List[Path]
     var stages: List[Int]
 
     def __init__(out self, total: Int):
         self.total = total
         self.completed = 0
-        self.paths = List[String]()
+        self.paths = List[Path]()
         self.stages = List[Int]()
 
-    def update(mut self, path: String, stage: Int):
+    def update(mut self, path: Path, stage: Int):
         """Records the latest stage for path; leaving the active set counts
         the file as completed."""
         for i in range(len(self.paths)):
@@ -140,14 +141,13 @@ struct ProgressTracker(Movable):
             self.paths.append(path)
             self.stages.append(stage)
 
-    def paths_for(self, stage: Int) -> List[String]:
-        """Returns sorted basenames of files currently in stage."""
-        var result = List[String]()
+    def paths_for(self, stage: Int, out result: List[String]):
+        """Returns the sorted file names of files currently in stage."""
+        result = List[String]()
         for i in range(len(self.paths)):
             if self.stages[i] == stage:
-                result.append(base_name(self.paths[i]))
+                result.append(self.paths[i].name())
         sort(Span(result))
-        return result^
 
 
 def format_progress(progress: ProgressTracker) -> String:
@@ -182,7 +182,7 @@ def clear_progress(mut out: Output):
 
 def print_result_block(mut out: Output, result: FileResult, colors: Colors):
     """Writes the compile command, process output, and PASS/FAIL status."""
-    out.write(colors.header("=== " + result.path + " ===") + "\n")
+    out.write(colors.header(String("=== ", result.path, " ===")) + "\n")
     out.write(
         colors.label("compile command:")
         + " "
@@ -202,13 +202,13 @@ def print_result_block(mut out: Output, result: FileResult, colors: Colors):
 
 def print_precompile_block(
     mut out: Output,
-    path: String,
+    path: Path,
     command: List[String],
     result: ProcessResult,
     colors: Colors,
 ):
     """Writes the command and captured output for one precompiled package."""
-    out.write(colors.header("=== precompile " + path + " ===") + "\n")
+    out.write(colors.header(String("=== precompile ", path, " ===")) + "\n")
     out.write(
         colors.label("precompile command:")
         + " "

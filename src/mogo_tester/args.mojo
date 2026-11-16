@@ -1,5 +1,6 @@
 """Command-line parsing."""
 
+from std.pathlib import Path
 from std.sys import num_logical_cores
 
 from .asan import ASANRuntime
@@ -8,30 +9,30 @@ from .asan import ASANRuntime
 struct Config(Copyable, Movable):
     """Runtime configuration derived from command-line arguments."""
 
-    var test_paths: List[String]
+    var test_paths: List[Path]
     var parallel: Int
     var mojo_build_args: List[String]
-    var precompile_paths: List[String]
+    var precompile_paths: List[Path]
     var keep_artifacts: Bool
     var no_color: Bool
     var show_version: Bool
     var show_help: Bool
     var asan: Bool
     var asan_runtime: ASANRuntime
-    var precompile_import_dir: String
+    var precompile_import_dir: Optional[Path]
 
     def __init__(out self):
-        self.test_paths = List[String]()
+        self.test_paths = List[Path]()
         self.parallel = num_logical_cores()
         self.mojo_build_args = List[String]()
-        self.precompile_paths = List[String]()
+        self.precompile_paths = List[Path]()
         self.keep_artifacts = False
         self.no_color = False
         self.show_version = False
         self.show_help = False
         self.asan = False
         self.asan_runtime = ASANRuntime()
-        self.precompile_import_dir = ""
+        self.precompile_import_dir = None
 
 
 comptime VALUE_OPTIONS: List[String] = [
@@ -119,14 +120,14 @@ def _parse_int(name: String, value: String) raises UsageError -> Int:
         )
 
 
-def parse_args(args: List[String]) raises UsageError -> Config:
+def parse_args(args: List[String], out cfg: Config) raises UsageError:
     """Converts CLI arguments into configuration.
 
     Options may appear before or after test path operands; `--` ends option
     parsing. A value option consumes the next token even if it starts with a
     dash, so `--mojo-build-arg -g` works.
     """
-    var cfg = Config()
+    cfg = Config()
     var split_build_args = List[String]()
     var i = 0
     while i < len(args):
@@ -134,11 +135,11 @@ def parse_args(args: List[String]) raises UsageError -> Config:
         i += 1
         if arg == "--":
             while i < len(args):
-                cfg.test_paths.append(args[i])
+                cfg.test_paths.append(Path(args[i]))
                 i += 1
             break
         if not is_option(arg):
-            cfg.test_paths.append(arg)
+            cfg.test_paths.append(Path(arg))
             continue
 
         var parsed = option_name(arg)
@@ -147,7 +148,7 @@ def parse_args(args: List[String]) raises UsageError -> Config:
 
         if name == "h" or name == "help":
             cfg.show_help = True
-            return cfg^
+            return
 
         if name in materialize[VALUE_OPTIONS]():
             var value: String
@@ -170,7 +171,7 @@ def parse_args(args: List[String]) raises UsageError -> Config:
                 for field in value.split():
                     split_build_args.append(String(field))
             else:
-                cfg.precompile_paths.append(value)
+                cfg.precompile_paths.append(Path(value))
             continue
 
         if name in materialize[BOOL_OPTIONS]():
@@ -196,12 +197,10 @@ def parse_args(args: List[String]) raises UsageError -> Config:
         cfg.mojo_build_args.append(value)
 
     if cfg.show_version:
-        return cfg^
+        return
 
     if len(cfg.test_paths) == 0:
         raise UsageError("usage: mogo-tester [options] <test-path>...", False)
-
-    return cfg^
 
 
 def usage(default_parallel: Int) -> String:

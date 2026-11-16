@@ -69,9 +69,20 @@ gh release view TAG --repo moseschmiedel/mogo_tester
 - `--mojo-build-args` is split with `strings.Fields`.
 - Compiled artifacts use sanitized basenames plus a path hash to avoid
   collisions.
-- Process handling uses libc through `external_call` in
-  `src/mogo_tester/libc.mojo`: `posix_spawnp` with file actions, PTYs from
-  `posix_openpt`, and a single-threaded `poll` loop for parallel jobs.
+- `src/mogo_tester/libc.mojo` holds only direct, `@inline(.always)`
+  translations of libc functions and constants. Abstractions built on them
+  live in their own modules: `fd` (pipes, reads, `PollSet`), `pty`, `spawn`
+  (`posix_spawn`, `look_path`, process groups), `signals`
+  (`InterruptGuard`), and `env` (`Environment`). `cffi` holds the pointer
+  glue.
+- Raw pointers from `cffi.addr`/`cstr` carry no origin and do not keep their
+  owner alive. Use the owning value again after the C call (`_ = value^`)
+  when nothing else does, or Mojo may free it before the call reads it.
+- Use `std.pathlib.Path` for filesystem paths. `paths.clean` adds the lexical
+  normalization (`filepath.Clean`) that `Path` lacks.
+- Prefer `out` result arguments over building a local and returning it with
+  `^`.
+- Parallel jobs run in a single-threaded `poll` loop.
 - Each child runs in its own process group with an empty signal mask and
   default SIGINT handling. Ctrl-C kills the child process groups.
 - SIGINT handling cannot block the signal (the Mojo runtime starts threads
@@ -88,7 +99,11 @@ gh release view TAG --repo moseschmiedel/mogo_tester
   "existing function with conflicting signature".
 - `--asan` uses `clang --print-resource-dir` or `CC` when set to locate the
   compatible AddressSanitizer runtime.
-- ASAN runtime lookup is configured for `darwin/arm64` and `linux/amd64`.
+- ASAN runtime lookup is configured for `aarch64-apple-macosx` and
+  `x86_64-unknown-linux-gnu`. Platforms are the `Platform` enum, written as
+  Mojo target triples.
 - Version metadata comes from `-D MOGO_VERSION`, `-D MOGO_COMMIT`, and
   `-D MOGO_DATE`.
-- A source file containing `# SKIP_ASAN` opts out of ASAN for that file.
+- `# SKIP_ASAN` and `# SKIP_DEBUG` are read from the comment header only
+  (`markers.read_markers`), so marker lookup does not read whole files.
+- Diagnostics go through `std.logger` on stderr (`app.logger()`).

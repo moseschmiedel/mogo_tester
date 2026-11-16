@@ -1,58 +1,36 @@
 """Top-level application flow and logging."""
 
+from std.logger import Level, Logger
+from std.pathlib import Path
+from std.sys import stderr
+
 from .args import Config, parse_args, usage
 from .asan import locate_asan_runtime
-from .libc import InterruptGuard, local_timestamp, make_temp_dir, write_all
-from .paths import discover_tests, remove_all
+from .paths import discover_tests, make_temp_dir, remove_all
 from .report import Output
 from .runner import precompile_modules, run_tests
+from .signals import InterruptGuard
 
 
-def _log_value(value: String) -> String:
-    """Quotes a log value when it contains spaces, quotes, or `=`."""
-    if value == "":
-        return '""'
-    var needs_quotes = False
-    for cp in value.codepoints():
-        var c = Int(cp)
-        if c <= 0x20 or c == ord('"') or c == ord("=") or c == 0x7F:
-            needs_quotes = True
-            break
-    if not needs_quotes:
-        return value
-    var escaped = (
-        value.replace("\\", "\\\\")
-        .replace('"', '\\"')
-        .replace("\n", "\\n")
-        .replace("\t", "\\t")
-    )
-    return '"' + escaped + '"'
+comptime AppLogger = Logger[Level.INFO]
+"""Logger for diagnostics on stderr; report output goes to stdout."""
 
 
-def log(level: String, message: String, attrs: List[Tuple[String, String]]):
-    """Writes one logfmt record to stderr."""
-    var line = String(
-        "time=",
-        local_timestamp(),
-        " level=",
-        level,
-        " msg=",
-        _log_value(message),
-    )
-    for attr in attrs:
-        line += " " + attr[0] + "=" + _log_value(attr[1])
-    write_all(2, line + "\n")
+def logger() -> AppLogger:
+    """Returns the stderr logger."""
+    return AppLogger(fd=stderr)
 
 
-def format_version(version: String, commit: String, date: String) -> String:
+def format_version(
+    version: String, commit: String, date: String, out text: String
+):
     """Joins the version with commit and date metadata, omitting empty or
     unknown fields."""
-    var text = version
+    text = version
     if commit != "" and commit != "unknown":
         text += " commit=" + commit
     if date != "" and date != "unknown":
         text += " date=" + date
-    return text^
 
 
 def run(args: List[String], version: String, mut out: Output) raises:
@@ -82,7 +60,7 @@ def run(args: List[String], version: String, mut out: Output) raises:
 
     var paths = discover_tests(cfg.test_paths)
 
-    var artifact_dir: String
+    var artifact_dir: Path
     try:
         artifact_dir = make_temp_dir("mogo-tester-")
     except e:
@@ -95,17 +73,15 @@ def run(args: List[String], version: String, mut out: Output) raises:
             try:
                 remove_all(artifact_dir)
             except e:
-                log(
-                    "ERROR",
-                    "remove artifact directory",
-                    [("path", artifact_dir), ("error", String(e))],
+                logger().error(
+                    "remove artifact directory", artifact_dir, String(e)
                 )
 
 
 def _run_in(
     mut cfg: Config,
-    paths: List[String],
-    artifact_dir: String,
+    paths: List[Path],
+    artifact_dir: Path,
     mut out: Output,
     mut guard: InterruptGuard,
 ) raises:
@@ -116,21 +92,21 @@ def _run_in(
     if guard.interrupted():
         raise Error("interrupted")
 
-    log(
-        "INFO",
+    var operands = List[String]()
+    for test_path in cfg.test_paths:
+        operands.append(String(test_path))
+    logger().info(
         "running mojo tests",
-        [
-            ("paths", "[" + " ".join(cfg.test_paths) + "]"),
-            ("count", String(len(paths))),
-            ("parallel", String(cfg.parallel)),
-        ],
+        String("paths=[", " ".join(operands), "]"),
+        String("count=", len(paths)),
+        String("parallel=", cfg.parallel),
     )
 
     var outcome = run_tests(cfg, paths, artifact_dir, out, guard)
     var summary = outcome[0].copy()
 
     if cfg.keep_artifacts:
-        out.write("artifacts: " + artifact_dir + "\n")
+        out.write(String("artifacts: ", artifact_dir, "\n"))
 
     if outcome[1]:
         raise Error("interrupted")

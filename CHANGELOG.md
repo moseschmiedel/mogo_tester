@@ -16,6 +16,14 @@ All notable changes to this project will be documented in this file.
 - Ctrl-C now also kills processes started by compile and test processes.
 - Version metadata is injected with `-D MOGO_VERSION=...`,
   `-D MOGO_COMMIT=...`, and `-D MOGO_DATE=...` instead of Go linker flags.
+- **Breaking:** `# SKIP_ASAN` and `# SKIP_DEBUG` are only recognized in the
+  comment header at the top of a file (leading blank or `#` lines).
+  `# SKIP_ASAN` was previously recognized anywhere in the file.
+- Diagnostics on stderr use the Mojo standard library logger, for example
+  `INFO::: running mojo tests ...` and `ERROR::: application failed: ...`,
+  instead of Go `slog` key-value records.
+- Platform names in ASAN errors use Mojo target triples, such as
+  `x86_64-unknown-linux-gnu`.
 
 ## [2.3.3] - 2026-06-15
 
