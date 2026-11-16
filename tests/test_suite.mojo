@@ -167,6 +167,16 @@ def test_glob_match_elements() raises:
     assert_true(glob_match("a*b*c", "aXbYbZc"))
 
 
+def test_glob_match_unicode_characters() raises:
+    assert_true(glob_match("?.mojo", "é.mojo"))
+    assert_true(glob_match("[é].mojo", "é.mojo"))
+    assert_true(glob_match("[à-ê].mojo", "é.mojo"))
+    assert_false(glob_match("[!é].mojo", "é.mojo"))
+    assert_true(glob_match("t_?ü.mojo", "t_xü.mojo"))
+    assert_false(glob_match("??.mojo", "é.mojo"))
+    assert_true(exclude_matches("?.mojo", Path("docs/é.mojo")))
+
+
 def test_glob_match_double_star() raises:
     assert_true(glob_match("**/a.mojo", "a.mojo"))
     assert_true(glob_match("**/a.mojo", "x/y/a.mojo"))

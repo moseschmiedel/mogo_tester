@@ -5,14 +5,14 @@ from std.pathlib import Path
 from ..fs.paths import clean
 
 
-comptime _STAR = UInt8(ord("*"))
-comptime _QUESTION = UInt8(ord("?"))
-comptime _LBRACKET = UInt8(ord("["))
-comptime _RBRACKET = UInt8(ord("]"))
-comptime _BANG = UInt8(ord("!"))
-comptime _CARET = UInt8(ord("^"))
-comptime _DASH = UInt8(ord("-"))
-comptime _BACKSLASH = UInt8(ord("\\"))
+comptime _STAR = UInt32(ord("*"))
+comptime _QUESTION = UInt32(ord("?"))
+comptime _LBRACKET = UInt32(ord("["))
+comptime _RBRACKET = UInt32(ord("]"))
+comptime _BANG = UInt32(ord("!"))
+comptime _CARET = UInt32(ord("^"))
+comptime _DASH = UInt32(ord("-"))
+comptime _BACKSLASH = UInt32(ord("\\"))
 
 
 struct Exclusion(Movable):
@@ -66,28 +66,33 @@ def exclude_matches(pattern: String, path: Path) -> Bool:
 def glob_match(pattern: String, path: String) -> Bool:
     """Reports whether a slash-separated glob pattern matches path.
 
-    Within a path element, `*` matches any run of bytes, `?` matches one
-    byte, `[...]` matches a byte class (ranges like `a-z`, negation with `!`
-    or `^`), and `\\` escapes the next byte. A `**` element matches zero or
+    Within a path element, `*` matches any run of characters, `?` matches one
+    character, `[...]` matches a character class (ranges like `a-z`, negation
+    with `!` or `^`), and `\\` escapes the next character. Characters are
+    Unicode code points. A `**` element matches zero or
     more whole path elements. An unterminated `[` matches itself.
     """
     return _match_parts(_split(pattern), 0, _split(path), 0)
 
 
-def _split(text: String, out parts: List[List[UInt8]]):
-    parts = List[List[UInt8]]()
+def _split(text: String, out parts: List[List[UInt32]]):
+    """Splits text on `/` into elements of Unicode code points."""
+    parts = List[List[UInt32]]()
     for part in text.split("/"):
-        parts.append(List[UInt8](part.as_bytes()))
+        var element = List[UInt32]()
+        for cp in part.codepoints():
+            element.append(UInt32(Int(cp)))
+        parts.append(element^)
 
 
-def _is_double_star(part: List[UInt8]) -> Bool:
+def _is_double_star(part: List[UInt32]) -> Bool:
     return len(part) == 2 and part[0] == _STAR and part[1] == _STAR
 
 
 def _match_parts(
-    pattern: List[List[UInt8]],
+    pattern: List[List[UInt32]],
     pattern_index: Int,
-    path: List[List[UInt8]],
+    path: List[List[UInt32]],
     path_index: Int,
 ) -> Bool:
     var pi = pattern_index
@@ -110,7 +115,7 @@ def _match_parts(
     return si == len(path)
 
 
-def _match_element(pattern: List[UInt8], text: List[UInt8]) -> Bool:
+def _match_element(pattern: List[UInt32], text: List[UInt32]) -> Bool:
     var pi = 0
     var si = 0
     var star = -1
@@ -122,13 +127,13 @@ def _match_element(pattern: List[UInt8], text: List[UInt8]) -> Bool:
                 mark = si
                 pi += 1
                 continue
-            var next = _match_byte(pattern, pi, text[si])
+            var next = _match_char(pattern, pi, text[si])
             if next >= 0:
                 pi = next
                 si += 1
                 continue
         if star >= 0:
-            # Let the last `*` absorb one more byte and retry.
+            # Let the last `*` absorb one more character and retry.
             pi = star + 1
             mark += 1
             si = mark
@@ -139,26 +144,26 @@ def _match_element(pattern: List[UInt8], text: List[UInt8]) -> Bool:
     return pi == len(pattern)
 
 
-def _match_byte(pattern: List[UInt8], index: Int, byte: UInt8) -> Int:
-    """Matches one pattern token at index against byte; returns the index
+def _match_char(pattern: List[UInt32], index: Int, char: UInt32) -> Int:
+    """Matches one pattern token at index against char; returns the index
     after the token, or -1 if it does not match."""
     var token = pattern[index]
     if token == _QUESTION:
         return index + 1
     if token == _BACKSLASH and index + 1 < len(pattern):
-        return index + 2 if pattern[index + 1] == byte else -1
+        return index + 2 if pattern[index + 1] == char else -1
     if token == _LBRACKET:
-        var parsed = _match_class(pattern, index, byte)
+        var parsed = _match_class(pattern, index, char)
         if parsed[1] >= 0:
             return parsed[1] if parsed[0] else -1
-    return index + 1 if token == byte else -1
+    return index + 1 if token == char else -1
 
 
 def _match_class(
-    pattern: List[UInt8], start: Int, byte: UInt8
+    pattern: List[UInt32], start: Int, char: UInt32
 ) -> Tuple[Bool, Int]:
     """Matches the class starting at `pattern[start] == '['`. Returns whether
-    byte matched and the index after `]`, or -1 if the class is unterminated.
+    char matched and the index after `]`, or -1 if the class is unterminated.
     """
     var i = start + 1
     var negate = False
@@ -188,6 +193,6 @@ def _match_class(
                 i += 1
                 high = pattern[i]
             i += 1
-        if low <= byte and byte <= high:
+        if low <= char and char <= high:
             matched = True
     return (False, -1)
