@@ -25,6 +25,10 @@ All notable changes to this project will be documented in this file.
 - Platform names in ASAN errors use Mojo target triples, such as
   `x86_64-unknown-linux-gnu`.
 
+### Removed
+
+- CodeQL scanning and its README badge. CodeQL cannot analyze Mojo sources.
+
 ## [2.3.3] - 2026-06-15
 
 ### Fixed
