@@ -215,6 +215,26 @@ def _spawn_error(argv: List[String], e: Error) -> String:
     return String("fork/exec ", argv[0], ": ", e)
 
 
-def normalize_pty_output(output: String) -> String:
-    """Converts CRLF produced by PTYs to LF."""
-    return output.replace("\r\n", "\n")
+def normalize_pty_output(output: String, out result: String):
+    """Converts PTY line endings to LF.
+
+    The terminal driver turns each LF into CRLF. Under load, macOS can emit
+    an extra CR (`\r\r\n`), so every run of CRs directly before an LF is
+    dropped; these render identically on a terminal. A CR that is not
+    followed by LF, as used for in-place progress lines, is kept.
+    """
+    var bytes = output.as_bytes()
+    var kept = List[UInt8](capacity=len(bytes))
+    var pending_crs = 0
+    for b in bytes:
+        if b == UInt8(ord("\r")):
+            pending_crs += 1
+            continue
+        if b != UInt8(ord("\n")):
+            for _ in range(pending_crs):
+                kept.append(UInt8(ord("\r")))
+        pending_crs = 0
+        kept.append(b)
+    for _ in range(pending_crs):
+        kept.append(UInt8(ord("\r")))
+    result = String(unsafe_from_utf8=kept)

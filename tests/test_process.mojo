@@ -6,7 +6,7 @@ from mogo_tester.posix import libc
 from mogo_tester.posix.cffi import vp
 from mogo_tester.posix.env import Environment
 from mogo_tester.posix.spawn import kill_group
-from mogo_tester.process.child import Child
+from mogo_tester.process.child import Child, normalize_pty_output
 from mogo_tester.process.result import CommandOptions
 from mogo_tester.process.run import poll_children, run_command
 
@@ -106,6 +106,12 @@ def test_environment_overrides_reach_child() raises:
         ["sh", "-c", 'echo "$MOGO_PROBE|$HOME"'], CommandOptions(False, env^)
     )
     assert_equal(r.stdout, "one two|/nowhere\n")
+
+
+def test_normalize_pty_output() raises:
+    assert_equal(normalize_pty_output("a\r\nb\r\r\nc\n"), "a\nb\nc\n")
+    assert_equal(normalize_pty_output("50%\r100%\r\n"), "50%\r100%\n")
+    assert_equal(normalize_pty_output("tail\r"), "tail\r")
 
 
 def test_large_output_is_drained() raises:
