@@ -1,4 +1,4 @@
-"""Tests for test discovery, source markers, and artifact names."""
+"""Tests for test discovery, source markers, artifact names, and doctests."""
 
 from std.os import makedirs
 from std.pathlib import Path
@@ -17,6 +17,12 @@ from mogo_tester.suite.artifacts import (
     sanitize_binary_name,
 )
 from mogo_tester.suite.discovery import discover_tests
+from mogo_tester.suite.doctest import (
+    discover_doctest_files,
+    parse_fence_info,
+    remap_locations,
+    scan_doctests,
+)
 from mogo_tester.suite.markers import SourceMarkers, read_markers
 
 
@@ -154,6 +160,189 @@ def test_precompiled_package_path_keeps_package_name() raises:
     assert_equal(
         precompiled_package_path_for("/art", "src/shared/"),
         Path("/art/shared.mojoc"),
+    )
+
+
+def test_discover_doctest_files_recursive_sorted() raises:
+    var dir = make_temp_dir("mogo-test-")
+    makedirs(dir / "guide")
+    makedirs(dir / ".pixi")
+    touch(dir / "guide" / "b.md")
+    touch(dir / "a.mojo")
+    touch(dir / "notes.txt")
+    touch(dir / ".pixi" / "hidden.md")
+    touch(dir / "readme.txt")
+    var found = discover_doctest_files([dir, dir / "readme.txt"])
+    assert_equal(len(found), 3)
+    assert_equal(found[0], dir / "a.mojo")
+    assert_equal(found[1], dir / "guide" / "b.md")
+    assert_equal(found[2], dir / "readme.txt")
+    var message = String()
+    try:
+        _ = discover_doctest_files([dir / "missing"])
+    except e:
+        message = String(e)
+    assert_true("no such file or directory" in message)
+    remove_all(dir)
+
+
+def test_parse_fence_info_attributes() raises:
+    var info = parse_fence_info(' {doctest="intro" global=true hide=true}')
+    assert_true(Bool(info))
+    assert_equal(info.value().name, "intro")
+    assert_true(info.value().is_global)
+
+    var unquoted = parse_fence_info(" {doctest=intro}")
+    assert_equal(unquoted.value().name, "intro")
+    assert_false(unquoted.value().is_global)
+
+
+def test_parse_fence_info_without_doctest() raises:
+    assert_false(Bool(parse_fence_info("")))
+    assert_false(Bool(parse_fence_info(" {hide=true}")))
+
+
+def test_markdown_wraps_body_in_main() raises:
+    var text = String(
+        "Intro\n"
+        '```mojo {doctest="a" global=true}\n'
+        "from std.testing import assert_equal\n"
+        "```\n"
+        "Text\n"
+        '```mojo {doctest="a"}\n'
+        "var x = 1\n"
+        "\n"
+        "assert_equal(x, 1)\n"
+        "```\n"
+    )
+    var tests = scan_doctests("guide.md", text)
+    assert_equal(len(tests), 1)
+    assert_equal(tests[0].error, "")
+    assert_equal(tests[0].label(), "guide.md:2#a")
+    assert_equal(
+        tests[0].code,
+        (
+            "from std.testing import assert_equal\n"
+            "def main() raises:\n"
+            "    var x = 1\n"
+            "\n"
+            "    assert_equal(x, 1)\n"
+        ),
+    )
+    assert_equal(tests[0].line_map, [3, 0, 7, 8, 9])
+
+
+def test_global_main_continuation_is_kept() raises:
+    var text = String(
+        '```mojo {doctest="g" global=true hide=true}\n'
+        "def main() raises:\n"
+        "    var x = 1\n"
+        "```\n"
+        '```mojo {doctest="g" global=true}\n'
+        "    print(x)\n"
+        "```\n"
+    )
+    var tests = scan_doctests("guide.md", text)
+    assert_equal(
+        tests[0].code, "def main() raises:\n    var x = 1\n    print(x)\n"
+    )
+
+
+def test_global_only_doctest_gets_empty_main() raises:
+    var text = String(
+        '```mojo {doctest="decl" global=true}\nstruct A:\n    pass\n```\n'
+    )
+    var tests = scan_doctests("a.md", text)
+    assert_equal(
+        tests[0].code, "struct A:\n    pass\ndef main() raises:\n    pass\n"
+    )
+
+
+def test_main_conflict_is_reported() raises:
+    var text = String(
+        '```mojo {doctest="r" global=true}\ndef main() raises:\n    pass\n```\n'
+        '```mojo {doctest="r"}\nmain()\n```\n'
+    )
+    var tests = scan_doctests("README.md", text)
+    assert_true(tests[0].error.find("def main") >= 0)
+    assert_equal(tests[0].code, "")
+
+
+def test_docstrings_scope_names_and_strip_indent() raises:
+    var text = String(
+        "struct A:\n"
+        '    """Doc.\n'
+        "\n"
+        '    ```mojo {doctest="ex"}\n'
+        "    if True:\n"
+        "        print(1)\n"
+        "    ```\n"
+        '    """\n'
+        "\n"
+        "    def f(self):\n"
+        '        """Doc.\n'
+        "\n"
+        '        ```mojo {doctest="ex"}\n'
+        "        print(2)\n"
+        "        ```\n"
+        '        """\n'
+        "        pass\n"
+    )
+    var tests = scan_doctests("src/a.mojo", text)
+    assert_equal(len(tests), 2)
+    assert_equal(
+        tests[0].code, "def main() raises:\n    if True:\n        print(1)\n"
+    )
+    assert_equal(tests[1].code, "def main() raises:\n    print(2)\n")
+    assert_equal(tests[1].line, 13)
+
+
+def test_other_fences_are_ignored() raises:
+    var text = String(
+        '```mojo\nnot a doctest\n```\n```sh\n```mojo {doctest="x"}\n```\n'
+    )
+    assert_equal(len(scan_doctests("a.md", text)), 0)
+
+
+def test_longer_fences_hide_nested_blocks() raises:
+    var text = String(
+        "````markdown\n"
+        '```mojo {doctest="inner"}\n'
+        "print(1)\n"
+        "```\n"
+        "````\n"
+        '````mojo {doctest="outer"}\n'
+        "print(2)\n"
+        "```\n"
+        "````\n"
+    )
+    var tests = scan_doctests("a.md", text)
+    assert_equal(len(tests), 1)
+    assert_equal(tests[0].name, "outer")
+    assert_equal(tests[0].code, "def main() raises:\n    print(2)\n    ```\n")
+
+
+def test_unterminated_and_malformed_fences() raises:
+    var tests = scan_doctests("a.md", '```mojo {doctest="u"}\nprint(1)\n')
+    assert_equal(tests[0].error, "line 1: unterminated code fence")
+
+    var bad = scan_doctests("a.md", "```mojo doctest=x\n```\n")
+    assert_true(bad[0].error.startswith("line 1: expected `{...}`"))
+
+
+def test_remap_locations() raises:
+    var text = String('```mojo {doctest="a"}\nprint(undefined)\n```\n')
+    var test = scan_doctests("docs/a.md", text)[0].copy()
+    var output = String(
+        "/tmp/x/a.mojo:2:11: error: use of unknown declaration\n"
+        "/tmp/x/a.mojo:1:1: note: here\n"
+    )
+    assert_equal(
+        remap_locations(output, "/tmp/x/a.mojo", test),
+        (
+            "docs/a.md:2:11: error: use of unknown declaration\n"
+            "/tmp/x/a.mojo:1:1: note: here\n"
+        ),
     )
 
 
