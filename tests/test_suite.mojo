@@ -16,7 +16,7 @@ from mogo_tester.suite.artifacts import (
     precompiled_package_path_for,
     sanitize_binary_name,
 )
-from mogo_tester.suite.discovery import discover_tests
+from mogo_tester.suite.discovery import discover_tests, empty_dir_warning
 from mogo_tester.suite.doctest import (
     discover_doctest_files,
     parse_fence_info,
@@ -30,9 +30,9 @@ def touch(path: Path) raises:
     path.write_text("def main():\n    pass\n")
 
 
-def discover_error(paths: List[Path]) -> String:
+def discover_error(paths: List[Path], recursive: Bool = False) -> String:
     try:
-        _ = discover_tests(paths)
+        _ = discover_tests(paths, recursive)
     except e:
         return String(e)
     return ""
@@ -45,7 +45,7 @@ def test_discover_tests_top_level_only_sorted() raises:
     touch(dir / "a.mojo")
     touch(dir / "notes.txt")
     touch(dir / "nested" / "c.mojo")
-    assert_equal(discover_tests([dir]), [dir / "a.mojo", dir / "b.mojo"])
+    assert_equal(discover_tests([dir]).paths, [dir / "a.mojo", dir / "b.mojo"])
     remove_all(dir)
     assert_false(dir.exists())
 
@@ -55,7 +55,7 @@ def test_discover_tests_cleans_directory_operands() raises:
     makedirs(dir / "suite")
     touch(dir / "suite" / "m.mojo")
     assert_equal(
-        discover_tests([Path(String(dir, "/./suite/"))]),
+        discover_tests([Path(String(dir, "/./suite/"))]).paths,
         [dir / "suite" / "m.mojo"],
     )
     remove_all(dir)
@@ -68,7 +68,7 @@ def test_discover_tests_operand_order_and_mixed() raises:
     touch(dir / "y.mojo")
     touch(dir / "suite" / "m.mojo")
     assert_equal(
-        discover_tests([dir / "z.mojo", dir / "suite", dir / "y.mojo"]),
+        discover_tests([dir / "z.mojo", dir / "suite", dir / "y.mojo"]).paths,
         [dir / "z.mojo", dir / "suite" / "m.mojo", dir / "y.mojo"],
     )
     remove_all(dir)
@@ -86,11 +86,60 @@ def test_discover_tests_errors() raises:
     assert_equal(
         discover_error([dir / "empty", dir / "empty2"]),
         String(
-            "no .mojo test files found in ", dir, "/empty, ", dir, "/empty2"
+            "no .mojo test files found in ",
+            dir,
+            "/empty, ",
+            dir,
+            "/empty2 (use --recursive to search subdirectories)",
         ),
     )
     assert_true(
         "no such file or directory" in discover_error([dir / "missing"])
+    )
+    assert_equal(
+        discover_error([dir / "empty"], recursive=True),
+        String("no .mojo test files found in ", dir, "/empty"),
+    )
+    remove_all(dir)
+
+
+def test_discover_tests_recursive_sorted() raises:
+    var dir = make_temp_dir("mogo-test-")
+    makedirs(dir / "b" / "deep")
+    makedirs(dir / "a")
+    touch(dir / "z.mojo")
+    touch(dir / "b" / "deep" / "x.mojo")
+    touch(dir / "b" / "notes.txt")
+    touch(dir / "a" / "y.mojo")
+    assert_equal(
+        discover_tests([dir], recursive=True).paths,
+        [dir / "a" / "y.mojo", dir / "b" / "deep" / "x.mojo", dir / "z.mojo"],
+    )
+    remove_all(dir)
+
+
+def test_discover_tests_reports_empty_dirs() raises:
+    var dir = make_temp_dir("mogo-test-")
+    makedirs(dir / "nested" / "sub")
+    makedirs(dir / "suite")
+    touch(dir / "nested" / "sub" / "a.mojo")
+    touch(dir / "suite" / "b.mojo")
+    var found = discover_tests([dir / "nested", dir / "suite"])
+    assert_equal(found.paths, [dir / "suite" / "b.mojo"])
+    assert_equal(found.empty_dirs, [dir / "nested"])
+    assert_equal(
+        len(discover_tests([dir / "nested"], recursive=True).empty_dirs), 0
+    )
+    assert_equal(
+        empty_dir_warning(Path("docs/test"), False),
+        (
+            "no .mojo files found in docs/test (use --recursive to search"
+            " subdirectories)"
+        ),
+    )
+    assert_equal(
+        empty_dir_warning(Path("docs/test"), True),
+        "no .mojo files found in docs/test",
     )
     remove_all(dir)
 

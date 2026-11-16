@@ -12,7 +12,7 @@ from .report.output import Output
 from .runner.precompile import precompile_modules
 from .runner.scheduler import TestSource, run_tests
 from .suite.artifacts import sanitize_binary_name
-from .suite.discovery import discover_tests
+from .suite.discovery import discover_tests, empty_dir_warning
 from .suite.doctest import discover_doctest_files, scan_doctests
 from .fs.sha256 import hex_encode, sha256
 from .toolchain.asan import locate_asan_runtime
@@ -66,7 +66,10 @@ def run(args: List[String], version: String, mut out: Output) raises:
 
     var paths = List[Path]()
     if len(cfg.test_paths) > 0:
-        paths = discover_tests(cfg.test_paths)
+        var discovery = discover_tests(cfg.test_paths, cfg.recursive)
+        for dir in discovery.empty_dirs:
+            logger().warning(empty_dir_warning(dir, cfg.recursive))
+        paths = discovery.paths.copy()
     var doctest_files = List[Path]()
     if len(cfg.doctest_paths) > 0:
         doctest_files = discover_doctest_files(cfg.doctest_paths)

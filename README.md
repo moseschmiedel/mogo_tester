@@ -52,7 +52,10 @@ mogo-tester [OPTION...] [TEST-PATH...]
 
 Each `TEST-PATH` must be either a directory or a direct `.mojo` file. Directory
 operands contribute top-level `.mojo` files in sorted path order; subdirectories
-are not searched. Direct file operands are run in the order provided. The final
+are not searched unless `--recursive` is given, in which case every `.mojo` file
+below the directory is included, sorted by path. Symlinked subdirectories are
+not followed. A directory operand that contributes no files produces a warning
+on stderr. Direct file operands are run in the order provided. The final
 test file list is compiled and run with up to `--parallel` workers.
 
 Each test file is compiled with:
@@ -73,6 +76,7 @@ failure skips the run step for that file.
 --precompile PATH         precompile Mojo package before building tests; repeatable
 --doctests PATH           run doctests from .mojo and .md files under PATH; repeatable
 --keep-artifacts          keep compiled binaries and print the artifact directory
+--recursive               search directory operands recursively
 --no-color                disable colored output
 --asan                    build and run tests with AddressSanitizer enabled
 --version                 print version and exit
@@ -87,6 +91,12 @@ is given.
 
 ```sh
 mogo-tester --parallel 4 --mojo-build-args "-I src" test
+```
+
+Run every `.mojo` file in a nested test tree:
+
+```sh
+mogo-tester --recursive docs/test
 ```
 
 Run specific files:
@@ -261,9 +271,14 @@ Currently, ASAN runtime lookup is configured for `aarch64-apple-macosx` and
 ### No Tests Found
 
 For directory operands, `mogo-tester` only discovers `.mojo` files directly
-inside that directory. Move nested test files to the top level, pass the direct
-`.mojo` file path, or run `mogo-tester` against the directory that contains the
-file.
+inside that directory by default. Pass `--recursive` to include nested files,
+pass the direct `.mojo` file path, or run `mogo-tester` against the directory
+that contains the file. A directory operand without any discovered files is
+reported with a warning such as:
+
+```text
+WARNING::: no .mojo files found in docs/test (use --recursive to search subdirectories)
+```
 
 ### Mojo Build Arguments
 
