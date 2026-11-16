@@ -3,7 +3,7 @@
 from std.pathlib import Path
 from std.sys import num_logical_cores
 
-from .asan import ASANRuntime
+from ..toolchain.asan import ASANRuntime
 
 
 struct Config(Copyable, Movable):

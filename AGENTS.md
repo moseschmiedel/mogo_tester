@@ -6,19 +6,40 @@ Guidance for agents working in this repository.
 
 `mogo-tester` is a Mojo 1.2 CLI that discovers top-level `.mojo` files in a
 directory, compiles each with `mojo build`, runs the produced binary, and
-reports per-file results plus an aggregate summary. Runtime behavior lives in
-the `src/mogo_tester` package; the CLI entry point is `src/main.mojo`. The Mojo
-toolchain is managed by Pixi (`pixi.toml`).
+reports per-file results plus an aggregate summary. The CLI entry point is
+`src/main.mojo`; runtime behavior lives in the `src/mogo_tester` package. The
+Mojo toolchain is managed by Pixi (`pixi.toml`).
+
+Package layout, from the lowest layer up; a package only imports from
+packages listed above it:
+
+| Package | Responsibility |
+| --- | --- |
+| `posix` | `libc` bindings, `cffi` pointer glue, and thin abstractions: `fd`, `pty`, `spawn`, `signals`, `env` |
+| `process` | Running child processes: `result` (`ProcessResult`, `CommandOptions`), `child` (`Child`), `run` (`poll_children`, `run_command`) |
+| `fs` | `paths` (`clean`, temp dirs, `remove_all`) and `sha256` |
+| `toolchain` | `platform` (`Platform`), `asan` (runtime lookup), `commands` (`mojo build` argv) |
+| `suite` | `discovery`, `markers`, `artifacts` (binary and `.mojoc` names) |
+| `cli` | `args` (`Config`, `parse_args`, `usage`) |
+| `report` | `output`, `format`, `results`, `progress`, `blocks` |
+| `runner` | `precompile` and the compile/run `scheduler` |
+| `app.mojo` | Top-level flow and the stderr logger |
+
+`cli.args` depends on `toolchain.asan` for `ASANRuntime`, and
+`toolchain.commands` builds from `cli.args.Config`.
+
+Tests mirror the packages: `tests/test_<package>.mojo`, plus `test_libc.mojo`
+for the raw bindings and `test_end_to_end.mojo` for the built binary.
 
 ## Common Commands
 
 - Build: `make build`
 - Test: `make test` (builds `bin/mogo-tester`, then runs `tests/` with it)
-- Run one test file: `pixi run mojo run -I src tests/test_args.mojo`
+- Run one test file: `pixi run mojo run -I src tests/test_cli.mojo`
 - Format Mojo code: `make format`
 
-`tests/test_cli.mojo` runs the built binary against a fake `mojo` script on
-`PATH`; set `MOGO_TESTER_BIN` to test a different binary.
+`tests/test_end_to_end.mojo` runs the built binary against a fake `mojo` script
+on `PATH`; set `MOGO_TESTER_BIN` to test a different binary.
 
 ## Documentation
 
@@ -69,16 +90,13 @@ gh release view TAG --repo moseschmiedel/mogo_tester
 - `--mojo-build-args` is split with `strings.Fields`.
 - Compiled artifacts use sanitized basenames plus a path hash to avoid
   collisions.
-- `src/mogo_tester/libc.mojo` holds only direct, `@inline(.always)`
-  translations of libc functions and constants. Abstractions built on them
-  live in their own modules: `fd` (pipes, reads, `PollSet`), `pty`, `spawn`
-  (`posix_spawn`, `look_path`, process groups), `signals`
-  (`InterruptGuard`), and `env` (`Environment`). `cffi` holds the pointer
-  glue.
+- `posix/libc.mojo` holds only direct, `@inline(.always)` translations of
+  libc functions and constants. Anything built on them goes into another
+  `posix` module.
 - Raw pointers from `cffi.addr`/`cstr` carry no origin and do not keep their
   owner alive. Use the owning value again after the C call (`_ = value^`)
   when nothing else does, or Mojo may free it before the call reads it.
-- Use `std.pathlib.Path` for filesystem paths. `paths.clean` adds the lexical
+- Use `std.pathlib.Path` for filesystem paths. `fs.paths.clean` adds the lexical
   normalization (`filepath.Clean`) that `Path` lacks.
 - Prefer `out` result arguments over building a local and returning it with
   `^`.
@@ -105,5 +123,5 @@ gh release view TAG --repo moseschmiedel/mogo_tester
 - Version metadata comes from `-D MOGO_VERSION`, `-D MOGO_COMMIT`, and
   `-D MOGO_DATE`.
 - `# SKIP_ASAN` and `# SKIP_DEBUG` are read from the comment header only
-  (`markers.read_markers`), so marker lookup does not read whole files.
+  (`suite.markers.read_markers`), so marker lookup does not read whole files.
 - Diagnostics go through `std.logger` on stderr (`app.logger()`).

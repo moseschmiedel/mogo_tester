@@ -8,7 +8,7 @@ from std.sys import argv, exit
 from std.sys.defines import get_defined_string
 
 from mogo_tester.app import format_version, logger, run
-from mogo_tester.report import Output
+from mogo_tester.report.output import Output
 
 
 def resolved_version() -> String:

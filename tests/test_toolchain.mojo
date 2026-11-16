@@ -1,26 +1,28 @@
-"""Tests for ASAN runtime lookup, platforms, source markers, and the
-compile command built from them."""
+"""Tests for target platforms, `mojo build` command lines, and
+AddressSanitizer runtime lookup.
+"""
 
 from std.os import makedirs
 from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from mogo_tester.args import Config
-from mogo_tester.asan import (
+from mogo_tester.cli.args import Config
+from mogo_tester.fs.paths import make_temp_dir, remove_all
+from mogo_tester.process.result import CommandOptions, ProcessResult
+from mogo_tester.process.run import run_command
+from mogo_tester.suite.markers import SourceMarkers
+from mogo_tester.toolchain.asan import (
     asan_reported,
     glob_match,
     locate_asan_runtime_with,
     mark_asan_failure,
 )
-from mogo_tester.markers import SourceMarkers, read_markers
-from mogo_tester.paths import make_temp_dir, remove_all
-from mogo_tester.platform import Platform
-from mogo_tester.process import CommandOptions, ProcessResult, run_command
-from mogo_tester.runner import (
+from mogo_tester.toolchain.commands import (
     compile_command,
     mojo_build_args_for_file,
     run_options,
 )
+from mogo_tester.toolchain.platform import Platform
 
 
 def write_script(path: Path, content: String) raises:
@@ -34,11 +36,6 @@ def fake_clang(dir: Path, resource_dir: Path) raises -> String:
     return String(path)
 
 
-# ===-----------------------------------------------------------------------===#
-# Platform
-# ===-----------------------------------------------------------------------===#
-
-
 def test_platform_uses_target_triples() raises:
     assert_equal(String(Platform.AARCH64_APPLE_MACOSX), "aarch64-apple-macosx")
     assert_equal(String(Platform.X86_64_APPLE_MACOSX), "x86_64-apple-macosx")
@@ -50,11 +47,6 @@ def test_platform_uses_target_triples() raises:
     )
     assert_true(Platform.current() == Platform.current())
     assert_false(Platform.AARCH64_APPLE_MACOSX == Platform.X86_64_APPLE_MACOSX)
-
-
-# ===-----------------------------------------------------------------------===#
-# ASAN runtime lookup
-# ===-----------------------------------------------------------------------===#
 
 
 def test_glob_match() raises:
@@ -142,55 +134,6 @@ def test_asan_report_marks_failure() raises:
     mark_asan_failure(r)
     assert_equal(r.exit_code, 1)
     assert_equal(r.error, "AddressSanitizer error detected")
-
-
-# ===-----------------------------------------------------------------------===#
-# Source markers
-# ===-----------------------------------------------------------------------===#
-
-
-def markers_for(content: String) raises -> SourceMarkers:
-    var dir = make_temp_dir("mogo-test-")
-    var path = dir / "t.mojo"
-    path.write_text(content)
-    var markers = read_markers(path)
-    remove_all(dir)
-    return markers^
-
-
-def test_markers_in_comment_header() raises:
-    var both = markers_for("# SKIP_DEBUG\n# SKIP_ASAN\ndef main():\n    pass\n")
-    assert_true(both.skip_debug)
-    assert_true(both.skip_asan)
-    var spaced = markers_for(
-        "#!shebang\n\n  # SKIP_ASAN reason\ndef main(): pass"
-    )
-    assert_true(spaced.skip_asan)
-    assert_false(spaced.skip_debug)
-
-
-def test_markers_after_header_are_ignored() raises:
-    var late = markers_for("def main():\n    pass\n# SKIP_ASAN\n")
-    assert_false(late.skip_asan)
-
-
-def test_marker_header_longer_than_one_chunk() raises:
-    var header = String("")
-    for _ in range(100):
-        header += "# license line padding padding padding\n"
-    var markers = markers_for(header + "# SKIP_DEBUG\ndef main(): pass\n")
-    assert_true(markers.skip_debug)
-
-
-def test_markers_for_unreadable_file() raises:
-    var markers = read_markers(Path("/nonexistent/t.mojo"))
-    assert_false(markers.skip_asan)
-    assert_false(markers.skip_debug)
-
-
-# ===-----------------------------------------------------------------------===#
-# Build arguments
-# ===-----------------------------------------------------------------------===#
 
 
 def test_skip_debug_drops_only_exact_g() raises:

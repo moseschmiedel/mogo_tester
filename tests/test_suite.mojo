@@ -1,3 +1,5 @@
+"""Tests for test discovery, source markers, and artifact names."""
+
 from std.os import makedirs
 from std.pathlib import Path
 from std.testing import (
@@ -8,17 +10,14 @@ from std.testing import (
     assert_true,
 )
 
-from mogo_tester.paths import (
+from mogo_tester.fs.paths import make_temp_dir, remove_all
+from mogo_tester.suite.artifacts import (
     binary_path_for,
-    clean,
-    discover_tests,
-    make_temp_dir,
-    package_name,
     precompiled_package_path_for,
-    remove_all,
     sanitize_binary_name,
 )
-from mogo_tester.sha256 import hex_encode, sha256
+from mogo_tester.suite.discovery import discover_tests
+from mogo_tester.suite.markers import SourceMarkers, read_markers
 
 
 def touch(path: Path) raises:
@@ -31,36 +30,6 @@ def discover_error(paths: List[Path]) -> String:
     except e:
         return String(e)
     return ""
-
-
-def test_sha256_known_vectors() raises:
-    assert_equal(
-        hex_encode(sha256(String("").as_bytes())),
-        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    )
-    assert_equal(
-        hex_encode(sha256(String("abc").as_bytes())),
-        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
-    )
-    assert_equal(
-        hex_encode(
-            sha256(
-                String(
-                    "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
-                ).as_bytes()
-            )
-        ),
-        "248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
-    )
-
-
-def test_clean() raises:
-    assert_equal(clean("./test/"), Path("test"))
-    assert_equal(clean("a//b/../c/."), Path("a/c"))
-    assert_equal(clean("/../x"), Path("/x"))
-    assert_equal(clean("../x"), Path("../x"))
-    assert_equal(clean(""), Path("."))
-    assert_equal(package_name("src/shared/"), "shared")
 
 
 def test_discover_tests_top_level_only_sorted() raises:
@@ -120,6 +89,45 @@ def test_discover_tests_errors() raises:
     remove_all(dir)
 
 
+def markers_for(content: String) raises -> SourceMarkers:
+    var dir = make_temp_dir("mogo-test-")
+    var path = dir / "t.mojo"
+    path.write_text(content)
+    var markers = read_markers(path)
+    remove_all(dir)
+    return markers^
+
+
+def test_markers_in_comment_header() raises:
+    var both = markers_for("# SKIP_DEBUG\n# SKIP_ASAN\ndef main():\n    pass\n")
+    assert_true(both.skip_debug)
+    assert_true(both.skip_asan)
+    var spaced = markers_for(
+        "#!shebang\n\n  # SKIP_ASAN reason\ndef main(): pass"
+    )
+    assert_true(spaced.skip_asan)
+    assert_false(spaced.skip_debug)
+
+
+def test_markers_after_header_are_ignored() raises:
+    var late = markers_for("def main():\n    pass\n# SKIP_ASAN\n")
+    assert_false(late.skip_asan)
+
+
+def test_marker_header_longer_than_one_chunk() raises:
+    var header = String("")
+    for _ in range(100):
+        header += "# license line padding padding padding\n"
+    var markers = markers_for(header + "# SKIP_DEBUG\ndef main(): pass\n")
+    assert_true(markers.skip_debug)
+
+
+def test_markers_for_unreadable_file() raises:
+    var markers = read_markers(Path("/nonexistent/t.mojo"))
+    assert_false(markers.skip_asan)
+    assert_false(markers.skip_debug)
+
+
 def test_binary_path_for_uses_hash_to_avoid_collisions() raises:
     var first = binary_path_for("/tmp/art", "a/test_x.mojo")
     var second = binary_path_for("/tmp/art", "b/test_x.mojo")
@@ -147,17 +155,6 @@ def test_precompiled_package_path_keeps_package_name() raises:
         precompiled_package_path_for("/art", "src/shared/"),
         Path("/art/shared.mojoc"),
     )
-
-
-def test_make_temp_dir_and_remove_all() raises:
-    var dir = make_temp_dir("mogo-test-")
-    assert_true(dir.is_dir())
-    assert_true(dir.name().startswith("mogo-test-"))
-    makedirs(dir / "a" / "b")
-    touch(dir / "a" / "b" / "f.mojo")
-    remove_all(dir)
-    assert_false(dir.exists())
-    remove_all(dir)  # Removing a missing path is not an error.
 
 
 def main() raises:

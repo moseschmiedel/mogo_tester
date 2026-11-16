@@ -5,7 +5,8 @@ from std.os.path import islink
 from std.pathlib import Path
 
 from .platform import Platform
-from .process import CommandOptions, ProcessResult, run_command
+from ..process.result import CommandOptions, ProcessResult
+from ..process.run import run_command
 
 
 @fieldwise_init

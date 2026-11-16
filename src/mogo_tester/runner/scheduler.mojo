@@ -1,36 +1,29 @@
-"""Precompilation and the parallel compile/run scheduler."""
+"""The parallel compile/run scheduler and its progress reporting."""
 
 from std.os import isatty
 from std.pathlib import Path
 from std.time import monotonic
 
-from .args import Config
-from .asan import asan_reported, mark_asan_failure
-from .markers import SourceMarkers, read_markers
-from .paths import binary_path_for, package_name, precompiled_package_path_for
-from .process import (
-    Child,
-    CommandOptions,
-    ProcessResult,
-    poll_children,
-    run_command,
-)
-from .report import (
-    Colors,
-    FileResult,
-    Output,
+from ..cli.args import Config
+from ..posix.signals import InterruptGuard
+from ..process.child import Child
+from ..process.result import CommandOptions, ProcessResult
+from ..process.run import poll_children
+from ..report.blocks import print_result_block, print_summary
+from ..report.output import Colors, Output
+from ..report.progress import (
     ProgressTracker,
-    RunSummary,
     STAGE_COMPILING,
     STAGE_DONE,
     STAGE_RUNNING,
     clear_progress,
-    print_precompile_block,
     print_progress,
-    print_result_block,
-    print_summary,
 )
-from .signals import InterruptGuard
+from ..report.results import FileResult, RunSummary
+from ..suite.artifacts import binary_path_for
+from ..suite.markers import read_markers
+from ..toolchain.asan import asan_reported, mark_asan_failure
+from ..toolchain.commands import compile_command, run_options
 
 
 comptime POLL_INTERVAL_MS = 100
@@ -86,97 +79,6 @@ struct Job(Movable):
         self.result = result^
         self.stage = stage
         self.use_asan = use_asan
-
-
-def mojo_build_args_for_file(
-    args: List[String], markers: SourceMarkers, out result: List[String]
-):
-    """Returns the build arguments for one file, dropping `-g` when the file
-    has the `# SKIP_DEBUG` marker."""
-    result = List[String](capacity=len(args))
-    for arg in args:
-        if not (markers.skip_debug and arg == "-g"):
-            result.append(arg)
-
-
-def compile_command(
-    cfg: Config,
-    path: Path,
-    binary_path: Path,
-    markers: SourceMarkers,
-    use_asan: Bool,
-    out argv: List[String],
-):
-    """Builds the `mojo build` argv for one test file."""
-    argv = ["mojo", "build"]
-    argv.extend(mojo_build_args_for_file(cfg.mojo_build_args, markers))
-    if cfg.precompile_import_dir:
-        argv.append("-I")
-        argv.append(String(cfg.precompile_import_dir.value()))
-    if use_asan:
-        argv.append("--sanitize")
-        argv.append("address")
-        argv.extend(cfg.asan_runtime.build_args.copy())
-    argv.append("-o")
-    argv.append(String(binary_path))
-    argv.append(String(path))
-
-
-def run_options(cfg: Config, use_asan: Bool, out options: CommandOptions):
-    """Returns PTY-backed options for a test binary, with the ASAN preload
-    variable when needed."""
-    options = CommandOptions.tty()
-    if use_asan:
-        options.env.set(
-            cfg.asan_runtime.preload_var, String(cfg.asan_runtime.lib_path)
-        )
-
-
-def precompile_modules(
-    cfg: Config,
-    artifact_dir: Path,
-    mut out: Output,
-    mut guard: InterruptGuard,
-) raises:
-    """Runs `mojo precompile` for each requested package before tests are
-    built. The .mojoc file name must match the package name because Mojo
-    uses it as the import name, so duplicate package names are rejected."""
-    for i in range(len(cfg.precompile_paths)):
-        var name = package_name(cfg.precompile_paths[i])
-        for j in range(i):
-            if package_name(cfg.precompile_paths[j]) == name:
-                raise Error(
-                    'precompile package basename "',
-                    name,
-                    '" is used by both ',
-                    cfg.precompile_paths[j],
-                    " and ",
-                    cfg.precompile_paths[i],
-                )
-
-    var colors = Colors(not cfg.no_color)
-    for path in cfg.precompile_paths:
-        var command: List[String] = [
-            "mojo",
-            "precompile",
-            "-o",
-            String(precompiled_package_path_for(artifact_dir, path)),
-            String(path),
-        ]
-        var outcome = run_command(command, CommandOptions.tty(), guard)
-        ref result = outcome[0]
-        print_precompile_block(out, path, command, result, colors)
-        if outcome[1]:
-            raise Error("interrupted")
-        if not result.succeeded():
-            if result.error != "":
-                raise Error("precompile module ", path, ": ", result.error)
-            raise Error(
-                "precompile module ",
-                path,
-                " failed with exit code ",
-                result.exit_code,
-            )
 
 
 def run_tests(

@@ -1,22 +1,18 @@
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from mogo_tester.process import ProcessResult
-from mogo_tester.report import (
-    Colors,
-    FileResult,
-    Output,
+from mogo_tester.process.result import ProcessResult
+from mogo_tester.report.blocks import print_result_block, print_summary
+from mogo_tester.report.format import format_command, format_duration
+from mogo_tester.report.output import Colors, Output
+from mogo_tester.report.progress import (
     ProgressTracker,
-    RunSummary,
     STAGE_COMPILING,
     STAGE_DONE,
     STAGE_RUNNING,
-    format_command,
-    format_duration,
     format_progress,
     print_progress,
-    print_result_block,
-    print_summary,
 )
+from mogo_tester.report.results import FileResult, RunSummary
 
 
 def result(

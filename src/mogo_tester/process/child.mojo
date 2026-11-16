@@ -1,20 +1,14 @@
-"""Child process execution with captured output.
-
-Children are driven by a poll(2) loop rather than threads: each `Child` owns
-its output descriptors, and callers repeatedly `poll_children` until every
-child reports `done()`.
-"""
+"""A spawned child process and the output it produces."""
 
 from std.ffi import c_int
 from std.pathlib import Path
 from std.time import monotonic
 
-from .env import Environment
-from .fd import PollSet, close_fd, make_pipe, read_fd
-from .libc import SIGKILL
-from .pty import open_pty
-from .signals import InterruptGuard
-from .spawn import (
+from ..posix.env import Environment
+from ..posix.fd import PollSet, close_fd, make_pipe, read_fd
+from ..posix.libc import SIGKILL
+from ..posix.pty import open_pty
+from ..posix.spawn import (
     SpawnRequest,
     kill_group,
     look_path,
@@ -22,58 +16,12 @@ from .spawn import (
     spawn,
     wait_pid,
 )
+from .result import CommandOptions, ProcessResult
 
-comptime READ_CHUNK = 65536
-# Upper bound on reads after exit, so a descendant that keeps writing to the
-# inherited output cannot stall the run.
+
 comptime MAX_DRAIN_READS = 256
-
-
-@fieldwise_init
-struct ProcessResult(Copyable, Movable):
-    """Captured output and exit information for one finished process.
-
-    `error` is empty when the process exited with status zero; otherwise it
-    describes the failure, such as `exit status 1` or `signal: killed`.
-    When `combined` is set, `stdout` holds interleaved stdout and stderr
-    captured through a PTY.
-    """
-
-    var stdout: String
-    var stderr: String
-    var combined: Bool
-    var exit_code: Int
-    var duration_ns: Int
-    var error: String
-
-    @staticmethod
-    def empty() -> Self:
-        return Self("", "", False, 0, 0, "")
-
-    @staticmethod
-    def failed(var message: String) -> Self:
-        return Self("", "", False, -1, 0, message^)
-
-    def succeeded(self) -> Bool:
-        """Reports whether the process exited zero without an error."""
-        return self.error == "" and self.exit_code == 0
-
-
-@fieldwise_init
-struct CommandOptions(Copyable, Movable):
-    """Execution options: PTY-backed output, and environment variables that
-    override the inherited environment."""
-
-    var fake_tty: Bool
-    var env: Environment
-
-    @staticmethod
-    def plain() -> Self:
-        return Self(False, Environment())
-
-    @staticmethod
-    def tty() -> Self:
-        return Self(True, Environment())
+"""Upper bound on reads after exit, so a descendant that keeps writing to the
+inherited output cannot stall the run."""
 
 
 struct Child(Movable):
@@ -270,76 +218,3 @@ def _spawn_error(argv: List[String], e: Error) -> String:
 def normalize_pty_output(output: String) -> String:
     """Converts CRLF produced by PTYs to LF."""
     return output.replace("\r\n", "\n")
-
-
-def poll_children(mut children: List[Child], timeout_ms: Int) -> Bool:
-    """Waits up to timeout_ms for output or exits and advances every child.
-
-    Returns whether any child is still running.
-    """
-    var fds = List[c_int]()
-    var owners = List[Int]()
-    var slots = List[Int]()
-    var waiting_for_exit = False
-    for c in range(len(children)):
-        if children[c].done():
-            continue
-        if len(children[c].fds) == 0 or children[c].status:
-            waiting_for_exit = True
-        for i in range(len(children[c].fds)):
-            if children[c].fds[i] >= 0:
-                fds.append(children[c].fds[i])
-                owners.append(c)
-                slots.append(i)
-
-    if len(fds) == 0 and not waiting_for_exit:
-        for c in range(len(children)):
-            if not children[c].done():
-                return True
-        return False
-
-    var timeout = timeout_ms
-    if waiting_for_exit:
-        timeout = min(timeout, 10)
-    var poll_set = PollSet(fds)
-    _ = poll_set.wait(timeout)
-
-    var buf = List[UInt8](length=READ_CHUNK, fill=0)
-    for k in range(len(fds)):
-        if poll_set.ready(k):
-            children[owners[k]].read_ready(slots[k], buf)
-
-    var running = False
-    for c in range(len(children)):
-        children[c].compact()
-        if children[c].try_reap():
-            children[c].finish_output(buf)
-        if not children[c].done():
-            running = True
-    return running
-
-
-def run_command(argv: List[String], options: CommandOptions) -> ProcessResult:
-    """Runs argv to completion and returns its captured result."""
-    var children = List[Child]()
-    children.append(Child(argv, options))
-    while poll_children(children, 100):
-        pass
-    return children[0].result()
-
-
-def run_command(
-    argv: List[String], options: CommandOptions, mut guard: InterruptGuard
-) -> Tuple[ProcessResult, Bool]:
-    """Runs argv to completion, killing it if SIGINT arrives.
-
-    Returns the captured result and whether the run was interrupted.
-    """
-    var children = List[Child]()
-    children.append(Child(argv, options))
-    var interrupted = False
-    while poll_children(children, 100):
-        if not interrupted and guard.interrupted():
-            interrupted = True
-            children[0].kill()
-    return (children[0].result(), interrupted)

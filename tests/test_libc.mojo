@@ -13,8 +13,8 @@ from std.testing import (
     assert_true,
 )
 
-from mogo_tester import libc
-from mogo_tester.cffi import (
+from mogo_tester.posix import libc
+from mogo_tester.posix.cffi import (
     CStringArray,
     addr,
     c_string_at,
