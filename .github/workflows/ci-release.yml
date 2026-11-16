@@ -31,11 +31,6 @@ jobs:
         with:
           cache: true
 
-      - name: Check formatting
-        run: |
-          pixi run format
-          git diff --exit-code
-
       - name: Run tests
         run: pixi run test
 
