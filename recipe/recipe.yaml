@@ -17,10 +17,13 @@ build:
     # for `cc` on PATH.
     - export MODULAR_MOJO_MAX_LINKER_DRIVER="$(command -v "${CC:-cc}")"
     - mkdir -p "$PREFIX/bin"
+    # Mojo otherwise targets the build host, which can emit AVX-512 that other
+    # linux-64 machines cannot execute.
     - >
       "$PREFIX/bin/mojo" build
       -I src
       -D MOGO_VERSION=v${{ version }}
+      ${{ "--target-cpu x86-64-v3" if target_platform == "linux-64" else "" }}
       -o "$PREFIX/bin/mogo-tester"
       src/main.mojo
 

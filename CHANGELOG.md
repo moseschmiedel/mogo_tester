@@ -6,8 +6,15 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- The `linux-64` package targets `x86-64-v3` instead of the build host's CPU,
+  so it no longer crashes on machines without AVX-512.
 - Releases upload only the package for the tagged version and fail before
   building when a recipe version does not match the tag.
+
+### Documentation
+
+- Document running `mogo-tester` from a separate Pixi environment to test
+  projects on another Mojo version.
 
 ## [3.1.0] - 2026-11-23
 
