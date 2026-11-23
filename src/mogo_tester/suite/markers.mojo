@@ -3,6 +3,7 @@
 from std.pathlib import Path
 
 comptime HEADER_CHUNK = 512
+comptime NEWLINE = Byte(ord("\n"))
 comptime BUILD_ARGS_MARKER = "# MOJO_BUILD_ARGS:"
 
 
@@ -29,27 +30,39 @@ def read_markers(path: Path, out result: SourceMarkers):
     grow with the file size. Unreadable files have no markers.
     """
     result = SourceMarkers()
-    var pending = String("")
+    # Keep bytes until a line is complete so a chunk boundary cannot split a
+    # UTF-8 sequence before decoding.
+    var pending = List[Byte]()
     try:
         with open(path, "r") as f:
             while True:
                 var chunk = f.read_bytes(HEADER_CHUNK)
                 var at_eof = len(chunk) < HEADER_CHUNK
-                pending += String(from_utf8_lossy=chunk)
-                var lines = pending.split("\n")
-                # The last element is incomplete unless the file has ended.
-                var complete = len(lines) if at_eof else len(lines) - 1
-                for i in range(complete):
-                    var line = String(lines[i].strip())
-                    if line != "" and not line.startswith("#"):
+                pending.extend(Span(chunk))
+                var start = 0
+                for i in range(len(pending)):
+                    if pending[i] != NEWLINE:
+                        continue
+                    var line = String(from_utf8_lossy=Span(pending)[start:i])
+                    if not _apply_header_line(line, result):
                         return
-                    _apply_marker(line, result)
+                    start = i + 1
+                var rest = List[Byte](Span(pending)[start:])
                 if at_eof:
+                    _ = _apply_header_line(String(from_utf8_lossy=rest), result)
                     return
-                var rest = String(lines[len(lines) - 1])
                 pending = rest^
     except:
         return
+
+
+def _apply_header_line(raw: String, mut markers: SourceMarkers) -> Bool:
+    """Apply a line and return whether it belongs to the comment header."""
+    var line = String(raw.strip())
+    if line != "" and not line.startswith("#"):
+        return False
+    _apply_marker(line, markers)
+    return True
 
 
 def _apply_marker(line: String, mut markers: SourceMarkers):

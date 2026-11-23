@@ -255,6 +255,13 @@ def test_marker_header_longer_than_one_chunk() raises:
     assert_true(markers.skip_debug)
 
 
+def test_marker_preserves_unicode_across_chunk_boundary() raises:
+    var prefix = String("# MOJO_BUILD_ARGS: -D VALUE=")
+    var padding = String("a") * (511 - prefix.byte_length())
+    var markers = markers_for(prefix + padding + "é\ndef main(): pass\n")
+    assert_equal(markers.build_args, ["-D", "VALUE=" + padding + "é"])
+
+
 def test_markers_for_unreadable_file() raises:
     var markers = read_markers(Path("/nonexistent/t.mojo"))
     assert_false(markers.skip_asan)
