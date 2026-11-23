@@ -139,9 +139,27 @@ def test_asan_report_marks_failure() raises:
 def test_skip_debug_drops_only_exact_g() raises:
     var args: List[String] = ["-I", "src", "-g", "-D", "X=-g"]
     assert_equal(mojo_build_args_for_file(args, SourceMarkers()), args)
+    var markers = SourceMarkers()
+    markers.skip_debug = True
     assert_equal(
-        mojo_build_args_for_file(args, SourceMarkers(False, True)),
+        mojo_build_args_for_file(args, markers),
         ["-I", "src", "-D", "X=-g"],
+    )
+
+
+def test_per_file_build_args_follow_suite_flags() raises:
+    """Forward per-file compiler flags after the suite-wide arguments."""
+    var args: List[String] = ["-g", "-D", "ASSERT=all"]
+    var markers = SourceMarkers()
+    markers.build_args = ["--debug-level", "line-tables"]
+    assert_equal(
+        mojo_build_args_for_file(args, markers),
+        ["-g", "-D", "ASSERT=all", "--debug-level", "line-tables"],
+    )
+    markers.skip_debug = True
+    assert_equal(
+        mojo_build_args_for_file(args, markers),
+        ["-D", "ASSERT=all", "--debug-level", "line-tables"],
     )
 
 

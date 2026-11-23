@@ -1,8 +1,9 @@
-"""Per-file opt-out markers in Mojo test sources."""
+"""Per-file compiler settings in Mojo test sources."""
 
 from std.pathlib import Path
 
 comptime HEADER_CHUNK = 512
+comptime BUILD_ARGS_MARKER = "# MOJO_BUILD_ARGS:"
 
 
 @fieldwise_init
@@ -13,9 +14,11 @@ struct SourceMarkers(Copyable, Movable):
     """`# SKIP_ASAN`: build and run this file without AddressSanitizer."""
     var skip_debug: Bool
     """`# SKIP_DEBUG`: drop the exact `-g` build argument for this file."""
+    var build_args: List[String]
+    """Arguments from `# MOJO_BUILD_ARGS:` lines, in source order."""
 
     def __init__(out self):
-        self = Self(False, False)
+        self = Self(False, False, List[String]())
 
 
 def read_markers(path: Path, out result: SourceMarkers):
@@ -50,6 +53,12 @@ def read_markers(path: Path, out result: SourceMarkers):
 
 
 def _apply_marker(line: String, mut markers: SourceMarkers):
+    """Apply one comment-header line to the file's settings."""
+    if line.startswith(BUILD_ARGS_MARKER):
+        var args = String(line[byte = BUILD_ARGS_MARKER.byte_length() :])
+        for field in args.split():
+            markers.build_args.append(String(field))
+        return
     if "# SKIP_ASAN" in line:
         markers.skip_asan = True
     if "# SKIP_DEBUG" in line:

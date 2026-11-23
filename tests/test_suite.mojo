@@ -235,6 +235,18 @@ def test_markers_after_header_are_ignored() raises:
     assert_false(late.skip_asan)
 
 
+def test_build_args_from_comment_header() raises:
+    """Accumulate whitespace-separated flags in comment-header order."""
+    var markers = markers_for(
+        "# license\n  # MOJO_BUILD_ARGS: -D\tASSERT=all\n"
+        "# MOJO_BUILD_ARGS: --debug-level line-tables\n"
+        "def main(): pass\n# MOJO_BUILD_ARGS: -g0\n"
+    )
+    assert_equal(
+        markers.build_args, ["-D", "ASSERT=all", "--debug-level", "line-tables"]
+    )
+
+
 def test_marker_header_longer_than_one_chunk() raises:
     var header = String("")
     for _ in range(100):
