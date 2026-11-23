@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [3.1.1] - 2026-11-23
+
 ### Fixed
 
 - The `linux-64` package targets `x86-64-v3` instead of the build host's CPU,
