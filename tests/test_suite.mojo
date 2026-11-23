@@ -235,12 +235,31 @@ def test_markers_after_header_are_ignored() raises:
     assert_false(late.skip_asan)
 
 
+def test_build_args_from_comment_header() raises:
+    """Accumulate whitespace-separated flags in comment-header order."""
+    var markers = markers_for(
+        "# license\n  # MOJO_BUILD_ARGS: -D\tASSERT=all\n"
+        "# MOJO_BUILD_ARGS: --debug-level line-tables\n"
+        "def main(): pass\n# MOJO_BUILD_ARGS: -g0\n"
+    )
+    assert_equal(
+        markers.build_args, ["-D", "ASSERT=all", "--debug-level", "line-tables"]
+    )
+
+
 def test_marker_header_longer_than_one_chunk() raises:
     var header = String("")
     for _ in range(100):
         header += "# license line padding padding padding\n"
     var markers = markers_for(header + "# SKIP_DEBUG\ndef main(): pass\n")
     assert_true(markers.skip_debug)
+
+
+def test_marker_preserves_unicode_across_chunk_boundary() raises:
+    var prefix = String("# MOJO_BUILD_ARGS: -D VALUE=")
+    var padding = String("a") * (511 - prefix.byte_length())
+    var markers = markers_for(prefix + padding + "é\ndef main(): pass\n")
+    assert_equal(markers.build_args, ["-D", "VALUE=" + padding + "é"])
 
 
 def test_markers_for_unreadable_file() raises:

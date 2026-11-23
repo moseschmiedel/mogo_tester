@@ -10,12 +10,16 @@ from ..suite.markers import SourceMarkers
 def mojo_build_args_for_file(
     args: List[String], markers: SourceMarkers, out result: List[String]
 ):
-    """Returns the build arguments for one file, dropping `-g` when the file
-    has the `# SKIP_DEBUG` marker."""
-    result = List[String](capacity=len(args))
+    """Returns suite-wide arguments followed by arguments from the file header.
+
+    The `# SKIP_DEBUG` marker drops the exact `-g` suite-wide argument.
+    """
+    result = List[String](capacity=len(args) + len(markers.build_args))
     for arg in args:
         if not (markers.skip_debug and arg == "-g"):
             result.append(arg)
+    for arg in markers.build_args:
+        result.append(arg)
 
 
 def compile_command(

@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- `# MOJO_BUILD_ARGS:` appends compiler flags for an individual test file.
+
 ## [3.0.0] - 2026-11-16
 
 ### Added

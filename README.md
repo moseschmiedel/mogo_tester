@@ -317,8 +317,21 @@ WARNING::: --exclude pattern gone_test.mojo matched no test files
 `--mojo-build-args` is split on whitespace. If an argument contains spaces or
 must be passed as an exact token, use repeated `--mojo-build-arg` flags instead.
 
-To disable the exact debug build argument `-g` for one Mojo file, add this marker
-to the comment header at the top of the file:
+Add a `# MOJO_BUILD_ARGS:` line to a test file's comment header to pass flags
+to `mojo build` for that file. Both forms below select line-table debug
+information.
+
+```mojo
+# MOJO_BUILD_ARGS: -g1
+# MOJO_BUILD_ARGS: --debug-level line-tables
+```
+
+Like `--mojo-build-args`, the marker splits flags on whitespace. Repeat the
+marker to append flags in header order. The file's flags follow suite-wide
+flags, so Mojo uses the per-file value for options such as the debug level.
+
+Add `# SKIP_DEBUG` to the comment header to drop the exact suite-wide `-g`
+argument for that file.
 
 ```mojo
 # SKIP_DEBUG
