@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Releases upload only the package for the tagged version and fail before
+  building when a recipe version does not match the tag.
+
 ## [3.1.0] - 2026-11-23
 
 ### Added

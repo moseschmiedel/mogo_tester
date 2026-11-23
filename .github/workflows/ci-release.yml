@@ -59,6 +59,20 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Check recipe versions match tag
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME#v}"
+          for recipe in recipe/recipe.yaml recipe/recipe-mojo-community.yaml; do
+            recipe_version="$(sed -n 's/^  version: "\(.*\)"$/\1/p' "${recipe}" | head -n 1)"
+            if [[ "${recipe_version}" != "${version}" ]]; then
+              echo "${recipe} has version '${recipe_version}', expected '${version}'"
+              exit 1
+            fi
+          done
+
       - name: Build conda package
         uses: prefix-dev/rattler-build-action@v0.2.38
         with:
@@ -68,18 +82,21 @@ jobs:
 
       - name: Upload package to prefix.dev
         shell: bash
+        env:
+          TARGET_PLATFORM: ${{ matrix.target-platform }}
         run: |
           set -euo pipefail
 
+          version="${GITHUB_REF_NAME#v}"
           found=0
           while IFS= read -r pkg; do
             found=1
             echo "Uploading ${pkg}"
             rattler-build upload prefix --channel tree-d "${pkg}"
-          done < <(find output -type f \( -name "*.conda" -o -name "*.tar.bz2" \))
+          done < <(find "output/${TARGET_PLATFORM}" -maxdepth 1 -type f \( -name "mogo-tester-${version}-*.conda" -o -name "mogo-tester-${version}-*.tar.bz2" \))
 
           if [[ "${found}" -eq 0 ]]; then
-            echo "No conda packages found in output"
+            echo "No mogo-tester ${version} package found for ${TARGET_PLATFORM}"
             exit 1
           fi
 
