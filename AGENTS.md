@@ -51,18 +51,18 @@ on `PATH`; set `MOGO_TESTER_BIN` to test a different binary.
 
 ## Release Process
 
-Latest known release: `v3.1.0`.
-
-To prepare the next patch release:
+To prepare the next release:
 
 1. Move current `CHANGELOG.md` Unreleased entries under a dated version heading,
-   for example `## [2.2.2] - YYYY-MM-DD`.
-2. Bump `recipe/recipe.yaml` `context.version` to the same version without the
-   leading `v`.
+   for example `## [X.Y.Z] - YYYY-MM-DD`.
+2. Bump `context.version` in `recipe/recipe.yaml` and
+   `recipe/recipe-mojo-community.yaml` to the same version without the leading
+   `v`. The release workflow fails if either differs from the tag.
 3. Run `make test`.
-4. Commit the release prep, for example `git commit -m "Release v2.2.2"`.
-5. Tag the release, for example `git tag v2.2.2`.
-6. Push `main`, then push the tag.
+4. Open a `release/vX.Y.Z` PR titled `Release vX.Y.Z` and merge it once the
+   required test checks pass.
+5. Tag the merge commit with `git tag vX.Y.Z <merge-commit>`.
+6. Push the tag with `git push origin vX.Y.Z`.
 
 The GitHub Actions workflow `.github/workflows/ci-release.yml` runs when a
 `v*` tag is pushed. It builds the conda packages from
@@ -122,6 +122,7 @@ gh release view TAG --repo moseschmiedel/mogo_tester
   Mojo target triples.
 - Version metadata comes from `-D MOGO_VERSION`, `-D MOGO_COMMIT`, and
   `-D MOGO_DATE`.
-- `# SKIP_ASAN` and `# SKIP_DEBUG` are read from the comment header only
-  (`suite.markers.read_markers`), so marker lookup does not read whole files.
+- `# SKIP_ASAN`, `# SKIP_DEBUG`, and `# MOJO_BUILD_ARGS:` are read from the
+  comment header only (`suite.markers.read_markers`), so marker lookup does not
+  read whole files.
 - Diagnostics go through `std.logger` on stderr (`app.logger()`).
