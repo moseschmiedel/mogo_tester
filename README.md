@@ -32,6 +32,27 @@ pixi global install \
   mogo-tester
 ```
 
+The package requires Mojo 1.2 for its own runtime, but it compiles tests with
+whichever `mojo` is first on `PATH`. To test a project on another Mojo version,
+install `mogo-tester` in a separate Pixi environment:
+
+```toml
+[feature.test-runner.dependencies]
+mogo-tester = ">=3.1.1,<4"
+
+[environments]
+test-runner = { features = ["test-runner"], no-default-feature = true }
+```
+
+Then run that binary from the project's environment:
+
+```sh
+pixi install -e test-runner
+pixi run -e test "$PWD/.pixi/envs/test-runner/bin/mogo-tester" tests
+```
+
+The `linux-64` package targets `x86-64-v3`, so the CPU must support AVX2.
+
 Build a local binary from this repository with [Pixi](https://pixi.sh):
 
 ```sh
