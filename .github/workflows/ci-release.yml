@@ -64,9 +64,25 @@ jobs:
           unzip -q "${pkg}" -d "${check_dir}"
           tar --zstd -xf "${check_dir}"/pkg-*.tar.zst -C "${check_dir}"
 
-          zmm_count="$(objdump -d "${check_dir}/bin/mogo-tester" | grep -c zmm || true)"
-          if [[ "${zmm_count}" -ne 0 ]]; then
-            echo "Package uses AVX-512 registers in ${zmm_count} instructions"
+          # Keep each instruction on one line so its first bytes can be checked.
+          disassembly="${check_dir}/disassembly.txt"
+          objdump -d --insn-width=16 "${check_dir}/bin/mogo-tester" > "${disassembly}"
+
+          # In 64-bit mode, 0x62 after any segment or address-size prefix is EVEX.
+          read -r instruction_count evex_count < <(awk '
+            /^[ \t]*[0-9a-f]+:[ \t]+[0-9a-f][0-9a-f] / {
+              instructions++
+              if (!/\(bad\)/ && /^[ \t]*[0-9a-f]+:[ \t]+((26|2e|36|3e|64|65|67) )*62 /) evex++
+            }
+            END { print instructions + 0, evex + 0 }
+          ' "${disassembly}")
+
+          if [[ "${instruction_count}" -eq 0 ]]; then
+            echo "No instructions found in the package binary"
+            exit 1
+          fi
+          if [[ "${evex_count}" -ne 0 ]]; then
+            echo "Package uses EVEX encoding in ${evex_count} instructions"
             exit 1
           fi
 
