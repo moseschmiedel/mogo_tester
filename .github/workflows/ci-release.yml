@@ -39,10 +39,41 @@ jobs:
       - name: Run tests
         run: pixi run test
 
+  package-linux:
+    name: Check linux-64 package
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build conda package
+        uses: prefix-dev/rattler-build-action@v0.2.38
+        with:
+          artifact-name: conda-mogo-tester-linux-64-check
+          recipe-path: recipe/recipe.yaml
+          build-args: --target-platform linux-64 --channel https://conda.modular.com/max --channel conda-forge
+
+      - name: Reject AVX-512 instructions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pkg="$(find output/linux-64 -type f -name 'mogo-tester-*.conda' -print -quit)"
+          test -n "${pkg}"
+          check_dir="$(mktemp -d)"
+          unzip -q "${pkg}" -d "${check_dir}"
+          tar --zstd -xf "${check_dir}"/pkg-*.tar.zst -C "${check_dir}"
+
+          zmm_count="$(objdump -d "${check_dir}/bin/mogo-tester" | grep -c zmm || true)"
+          if [[ "${zmm_count}" -ne 0 ]]; then
+            echo "Package uses AVX-512 registers in ${zmm_count} instructions"
+            exit 1
+          fi
+
   publish-prefix:
     name: Publish prefix.dev package (${{ matrix.target-platform }})
     runs-on: ${{ matrix.os }}
-    needs: test
+    needs: [test, package-linux]
     if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     permissions:
       contents: read
