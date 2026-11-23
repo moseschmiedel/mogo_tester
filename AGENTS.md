@@ -51,7 +51,7 @@ on `PATH`; set `MOGO_TESTER_BIN` to test a different binary.
 
 ## Release Process
 
-Latest known release: `v3.0.0`.
+Latest known release: `v3.1.0`.
 
 To prepare the next patch release:
 
