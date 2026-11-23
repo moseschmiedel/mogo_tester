@@ -37,6 +37,13 @@ whichever `mojo` is first on `PATH`. To test a project on another Mojo version,
 install `mogo-tester` in a separate Pixi environment:
 
 ```toml
+[feature.test-runner]
+channels = [
+  "https://prefix.dev/tree-d",
+  "https://conda.modular.com/max",
+  "conda-forge",
+]
+
 [feature.test-runner.dependencies]
 mogo-tester = ">=3.1.1,<4"
 
